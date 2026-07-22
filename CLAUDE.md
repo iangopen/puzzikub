@@ -200,6 +200,7 @@ says "par", never "optimal".
 | `runs-to-groups-redherring` | hard, extreme | 21 / 24 | TWO tempting extenders, only one correct |
 | `runs-to-groups-composed` | hard, extreme | 24 / 27 | decoy + red herring on one board, coupled |
 | `cut-point` | **medium only** | **12** | **duplicates force valid runs to be CUT APART** |
+| `chain` | **medium only** | **9** | **a DEDUCTIVE chain: 8 forced deductions in sequence** |
 
 `archetypeId` is internal only — nothing player-facing names the mechanic.
 Dev-only `?forceArchetype=` accepts all of them (each still tier-restricted).
@@ -225,6 +226,57 @@ Its two caps are real and measured: **UI width** (`Board.tsx` is a fixed
 but needs ~860px and would overflow) and **uniqueness-vs-par tension**, which
 makes hard/extreme structurally unreachable. **Known limitation: par understates
 this archetype** — par counts moves, but its difficulty is search.
+
+### 4b. The CHAIN archetype — and the theorem that shapes it
+**A chain mechanic failed TWICE here before. Read this before touching it.** The
+deleted `buildDominoChain` modelled *"placing tile A physically pushes tile B out
+of its set, which pushes C"*. That is impossible in this game, for two separate
+reasons: the DROP reducer makes GRID→GRID an **unrestricted swap between any two
+cells** (nothing is ever physically blocked), and its premise was a **misread
+rule** — it assumed runs cap at length 4, but `isValidRun` has NO upper bound
+(the 4-cap is `isValidGroup`'s, on colours). Nothing was ever pushed out. It also
+punched holes in complete runs, so its boards failed `validateGrid` outright.
+
+**The correct framing is a DEDUCTIVE chain**: moves may be executed in any order;
+what is sequential is the REASONING.
+
+***THE THEOREM (probed, not assumed) — it rules out the obvious formalisation:***
+if a bag has a UNIQUE partition, a globally-reasoning solver determines every
+tile's block in ONE step, because a second globally-consistent block for any tile
+would itself extend to a second partition. **Deduction depth is therefore always
+1 under global reasoning, so a chain cannot be defined that way.** The chain lives
+in the LOCAL (myopic) model instead: a tile is determined when exactly ONE valid
+set containing it can still be formed from the remaining bag, ignoring whether
+the remainder stays solvable. That is how a player actually reasons, it is fully
+computable, and it is SOUND — the true partition is always among the locally
+possible sets, so a locally-forced deduction is always correct.
+
+**The LADDER.** Alternating run → group, where each block consumes a *hinge* tile
+that collapses the next block's options. Each run colour also owns a tile at the
+previous hinge; that extra tile is exactly what keeps its run ambiguous until the
+group there consumes it. `links=4` is the deepest the 13-value range allows
+(hinges 3 apart): 24 tiles, unique partition, **cascade depth 8 with 7 genuine
+steps** (a step counts as genuine only if the tile it determines had ≥2 candidates
+at move zero). Every one of the 8 links is confirmed by real `solveBagM2` calls
+showing the rival candidate sets are genuinely unsolvable.
+
+**It is NOT "decoy with extra steps"** — measured, not asserted. Ambiguous tiles
+fall **22 → 19 → 16 → 13 → 10 → 7 → 4 → 0** across the eight rounds: a gradual
+cascade, not one insight that collapses everything. For contrast, every other
+archetype stalls this cascade at depth 0 — myopic reasoning cannot even start on
+them.
+
+**Scope: m=1 deliberately.** Duplicates are not used even though the m=2
+machinery exists — the concept does not need them, and stacking a twice-failed
+mechanic onto new machinery would combine two risks for no benefit. An
+m=2-enriched version is a natural lower-risk follow-up.
+
+**Same low-par wall as cut-point, same structural cause:** a legal starting board
+must be valid, and valid arrangements of these tiles are largely the goal blocks
+± their hinge tile, so `fixed` is high and **par is 9** (verified as the true
+minimum over every layout, not just the builder's choice). Difficulty here is
+reasoning DEPTH, not move count — par understates it badly. Grid is 10×6, well
+inside the `Board.tsx` width limit.
 
 ### 5. Open items
 - **🐞 Library "Play" button is still BROKEN** (see the detailed note below).
@@ -728,6 +780,52 @@ main sections) — note the `handlePlay` Library bug below still blocks
 "load a saved puzzle and check X" verification. The L≤10 UI cap above is the
 one place where a straightforward future win exists (responsive Board → L=13 →
 par 16). COUPLED still needs its contested-resource redesign.
+
+**CHAIN ARCHETYPE — BUILT, WIRED AND VERIFIED (session after the m=2 migration).**
+`buildChain` / `buildChainAt` in `archetypes.ts`; harness `src/lib/chain.verify.ts`
+(**28 passed / 0 failed**). Wired into `generator.ts` sharing ONE roll with the
+cut-point band so the two medium-only layers are disjoint; `CHAIN_PROB` medium
+0.20 (measured emission ~18%). Hidden `archetypeId: 'chain'`. See "m=2
+ARCHITECTURE §4b" above for the design, the theorem behind it, and the two
+prior failures it avoids.
+
+*Real executed output:*
+```
+25/25 builds | a=25 b=25 c=25 d=25 e=25 UNIQUE=25 DEPTH=25 GENUINE=25  ALL=25
+pars={9} grids={10x6} cascadeDepths={8} genuineSteps={7}
+e.g. {1r 2r 3r}{3b 3a 3k}{4b 5b 6b}{6r 6a 6k}{7a 8a 9a}{9r 9b 9k}{10k 11k 12k}{12r 12b 12a}
+```
+*The chain proof — all 8 links, each with real solveBagM2 evidence that the
+rival candidate sets it rules out are genuinely unsolvable:*
+```
+round 1: 1r(initial 1)  2r(initial 1)
+round 2: 3a(4) 3k(4)      3a: 3 rivals at move zero, 3 proven UNSOLVABLE
+round 3: 4b(3) 5b(3)      4b: 2 rivals, 2 proven UNSOLVABLE
+round 4: 6r(4) 6k(4)      6r: 3 rivals, 3 proven UNSOLVABLE
+round 5: 7a(3) 8a(3)      7a: 2 rivals, 2 proven UNSOLVABLE
+round 6: 9r(4) 9b(4)      9r: 3 rivals, 3 proven UNSOLVABLE
+round 7: 10k(3) 11k(3)    10k: 2 rivals, 2 proven UNSOLVABLE
+round 8: 12r(4) 12b(4) 12a(4)  12r: 3 rivals, 3 proven UNSOLVABLE
+```
+*The crux the brief demanded be tested rather than assumed — "is this just decoy
+with extra steps?" NO, measured: ambiguous tiles per round*
+```
+22 -> 19 -> 16 -> 13 -> 10 -> 7 -> 4 -> 0     (gradual cascade, not a collapse)
+baseline, same measurement: runs-to-groups / decoy / composed all STALL at depth 0
+```
+*par honesty:* `par=9  minOverAllLayouts=9  simulated=9  validateGrid win`, 6/6.
+*Timing* 1.17 ms/build. *Emission:* chain 35/200 at medium, cut-point still 49,
+both base directions present, **0 leaks into easy/hard/extreme**.
+
+*Suite after this change — nothing regressed:* `verifyEngine` **53/0** +
+invariants (a)-(d) · `decoy` **23/0** · `redherring` **25/0** · `composed`
+**32/0** · `cutpoint` **36/0** · `chain` **28/0** · `mixedGoalPlanner` **37/0** ·
+`pairingMin` **31/0** with all seven original par numbers EXACT · `storage`
+**37/0** · `dragIdentity` **29/0**. `npm run build` clean.
+
+*Worth noting: the strict build gate earned its keep again* — `tsx` ran the new
+harness fine while `tsc -b` caught an unused import in it. Harnesses are
+typechecked by the build; `tsx` does not typecheck.
 
 **m=2 MIGRATION — Step 12 CLOSED. THE MIGRATION IS COMPLETE (Steps 1-12).**
 See "m=2 ARCHITECTURE — CURRENT TRUTH" near the top of this file for the
@@ -1241,6 +1339,7 @@ src/lib/decoy.verify.ts             23
 src/lib/redherring.verify.ts        25
 src/lib/composed.verify.ts          32
 src/lib/cutpoint.verify.ts          36
+src/lib/chain.verify.ts             28
 src/lib/mixedGoalPlanner.verify.ts  37
 src/lib/pairingMin.verify.ts        31   (~9 min — BFS-bound, run it in
                                           the background and keep working)
@@ -1253,13 +1352,21 @@ src/lib/dragIdentity.verify.ts      29
 ## Current status (update this after each session)
 **The m=2 migration is COMPLETE (Steps 1-12), on branch `m2-migration`, NOT yet
 merged to `main` — merging is a deliberate review decision, not automatic.**
-All nine harnesses green (303 checks, 0 failures), all eight par numbers exact,
+All ten harnesses green (331 checks, 0 failures), all par numbers exact,
 `npm run build` clean, and a cut-point puzzle has been played to a real
 `validateGrid` win in a browser at exactly par. Read "m=2 ARCHITECTURE —
 CURRENT TRUTH" at the top of this file before touching `src/lib/`.
 
-Six archetypes ship: `groups-to-runs`, `runs-to-groups`, plus the trap layers
-`decoy` / `redherring` / `composed` (hard+extreme) and `cut-point` (medium).
+Seven archetypes ship: `groups-to-runs`, `runs-to-groups`, the trap layers
+`decoy` / `redherring` / `composed` (hard+extreme), and the two MEDIUM-only
+deduction layers `cut-point` (par 12) and `chain` (par 9). The two medium layers
+share one probability roll so they stay disjoint.
+
+**Both deduction archetypes are structurally LOW-PAR** (9-12 vs medium's base
+16) for the same reason: a valid starting board is necessarily close to the
+goal, so `fixed` is high. Their difficulty is reasoning, not move count. If par
+ever needs to represent them better, that is a difficulty-metric change, not a
+construction bug.
 
 Known open, deliberately: the Library **Play** button (`App.tsx` `handlePlay`
 discards its argument) — does not block playtesting, since `?forceArchetype=`

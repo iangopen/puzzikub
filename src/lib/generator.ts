@@ -1,5 +1,5 @@
 import type { Difficulty, Puzzle } from '../types'
-import { buildComposed, buildCutPoint, buildDecoy, buildRedHerring, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType } from './archetypes'
+import { buildChain, buildComposed, buildCutPoint, buildDecoy, buildRedHerring, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType } from './archetypes'
 
 const BUILDERS: Record<ArchetypeType, (diff: Difficulty) => ReturnType<typeof buildGroupsToRuns>> = {
   'groups-to-runs': buildGroupsToRuns,
@@ -35,6 +35,16 @@ const REDHERRING_PROB: Partial<Record<Difficulty, number>> = { hard: 0.14, extre
 const CUTPOINT_PROB: Partial<Record<Difficulty, number>> = { medium: 0.25 }
 
 /**
+ * The chain layer — MEDIUM ONLY, and sharing ONE roll with the cut-point band
+ * below so the two medium-only layers stay disjoint (at most one per puzzle).
+ *
+ * Like cut-point it is a deduction puzzle rather than a trap puzzle: the board
+ * is a set of already-valid rows, and the work is figuring out the unique
+ * partition, which can only be deduced in sequence (see buildChainAt).
+ */
+const CHAIN_PROB: Partial<Record<Difficulty, number>> = { medium: 0.20 }
+
+/**
  * DEV-ONLY escape hatch for playtesting a specific variant. Not reachable from
  * any UI control — PlayScreen only honours it when the developer deliberately
  * types ?forceArchetype=... into the URL. See FORCE_TYPES below.
@@ -46,10 +56,11 @@ export type ForceType =
   | 'red-herring'
   | 'composed'
   | 'cut-point'
+  | 'chain'
 
 /** The accepted values, for validating untrusted input (e.g. a query param). */
 export const FORCE_TYPES: readonly ForceType[] = [
-  'pure-groups-to-runs', 'pure-runs-to-groups', 'decoy', 'red-herring', 'composed', 'cut-point',
+  'pure-groups-to-runs', 'pure-runs-to-groups', 'decoy', 'red-herring', 'composed', 'cut-point', 'chain',
 ]
 
 export function isForceType(v: string | null | undefined): v is ForceType {
@@ -83,13 +94,23 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
       case 'red-herring': return generateRedHerring(diff)
       case 'composed': return generateComposed(diff)
       case 'cut-point': return generateCutPoint(diff)
+      case 'chain': return generateChain(diff)
     }
   }
 
+  // The two medium-only deduction layers share ONE roll, so they are disjoint
+  // and at most one can apply to a puzzle.
   const cutPointP = CUTPOINT_PROB[diff] ?? 0
-  if (cutPointP > 0 && Math.random() < cutPointP) {
-    const cut = generateCutPoint(diff)
-    if (cut) return cut // else fall through to the ordinary archetypes
+  const chainP = CHAIN_PROB[diff] ?? 0
+  if (cutPointP + chainP > 0) {
+    const deductionRoll = Math.random()
+    if (deductionRoll < cutPointP) {
+      const cut = generateCutPoint(diff)
+      if (cut) return cut // else fall through to the ordinary archetypes
+    } else if (deductionRoll < cutPointP + chainP) {
+      const chain = generateChain(diff)
+      if (chain) return chain
+    }
   }
 
   const roll = Math.random()
@@ -109,6 +130,27 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
   const first: ArchetypeType = Math.random() < 0.5 ? 'groups-to-runs' : 'runs-to-groups'
   const second: ArchetypeType = first === 'groups-to-runs' ? 'runs-to-groups' : 'groups-to-runs'
   return generateArchetype(first, diff) ?? generateArchetype(second, diff)
+}
+
+/** Chain puzzles: the board is a set of already-valid rows whose unique
+ * partition can only be deduced in sequence. Same hidden-tag convention as the
+ * other layers — nothing player-facing names the mechanic or the chain order. */
+function generateChain(diff: Difficulty): Puzzle | null {
+  for (let i = 0; i < 40; i++) {
+    const result = buildChain(diff)
+    if (!result) continue
+    return {
+      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: `${diff} puzzle`,
+      diff,
+      grid: result.grid,
+      rack: result.rack,
+      optimalMoves: result.minMoves,
+      generated: true,
+      archetypeId: 'chain',
+    }
+  }
+  return null
 }
 
 /** Cut-point puzzles (m=2 Step 11): duplicate second copies force an

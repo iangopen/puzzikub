@@ -1373,6 +1373,260 @@ export function buildComposedAt(L: number): ComposedBuild | null {
 //    blockCount > 2 rather than clamping it.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// CHAIN ARCHETYPE — a DEDUCTIVE chain (m=1; duplicates deliberately not used).
+//
+// ***READ THIS BEFORE TOUCHING IT — a chain mechanic failed TWICE here before,
+// and both failures came from the same misunderstanding.***
+//
+// The DELETED `buildDominoChain` modelled "placing tile A physically pushes
+// tile B out of its set, which pushes C". That is impossible in this game, for
+// two independent reasons, both re-confirmed by reading the code:
+//   1. usePlayState's DROP reducer makes GRID→GRID an UNRESTRICTED SWAP between
+//      ANY two cells. Nothing is ever physically blocked, so no move can ever
+//      require another move first.
+//   2. Its premise was a misread rule: it assumed a run maxes out at length 4,
+//      so adding a tile would force one out. `isValidRun` has NO upper bound —
+//      the 4-cap belongs to `isValidGroup` (4 colours). Nothing ever gets
+//      pushed out. (It also punched holes in complete runs, so its starting
+//      boards failed validateGrid outright.)
+//
+// THE CORRECT FRAMING, and what this archetype actually builds: the chain is
+// DEDUCTIVE, not physical. The player may execute moves in any order; what is
+// sequential is the REASONING. You cannot work out where a tile belongs until
+// you have worked out where an earlier one belongs.
+//
+// ***A THEOREM THAT CONSTRAINS THE WHOLE DESIGN (probed, not assumed):*** if a
+// bag has a UNIQUE partition, then a globally-reasoning solver determines every
+// tile's block in ONE step — any second globally-consistent block for a tile
+// would itself extend to a complete partition, i.e. a second partition. So
+// depth is always 1 under global reasoning, and a chain CANNOT be defined that
+// way. The chain therefore lives in the LOCAL (myopic) model: a tile is
+// determined when exactly ONE valid set containing it can still be formed from
+// the remaining bag, ignoring whether the remainder stays solvable. That is how
+// a player actually reasons ("where can this tile even go?"), it is fully
+// computable, and — because the true partition is always among the locally
+// possible ones — a locally-forced deduction is always CORRECT.
+//
+// THE LADDER. Alternating run → group, where each block consumes a HINGE tile
+// that collapses the next block's options:
+//     run(c0 over [s..s+2]) → group at s+2 → run(c1 over [s+3..s+5]) → ...
+// Each run colour also owns a tile at the PREVIOUS hinge; that extra tile is
+// what keeps its run ambiguous until the group there consumes it. Measured:
+// links=4 gives 24 tiles, a UNIQUE partition, and a local cascade of DEPTH 8
+// with 7 genuine steps (a step is genuine only when the tile it determines had
+// ≥2 candidates at move zero — otherwise it was obvious from the start).
+//
+// KNOWN LIMITATION, stated plainly: par understates this archetype badly. A
+// legal starting board is necessarily "close" to the goal (board rows are valid
+// sets, and valid arrangements of these tiles are largely the goal blocks ±
+// their hinge tile), so `fixed` is high and par lands at 9 — the same
+// structural low-par wall the cut-point archetype hit. Difficulty here is
+// reasoning DEPTH, not move count.
+// ---------------------------------------------------------------------------
+
+/** L per difficulty. `links` is the number of run→group rungs. links=4 is the
+ * deepest the 13-value range allows (hinges 3 apart, last hinge ≤ 13). */
+function chainParamsFor(diff: Difficulty): { links: number } | null {
+  switch (diff) {
+    case 'medium': return { links: 4 }
+    default: return null
+  }
+}
+
+export interface ChainBuild extends ArchetypeResult {
+  goal: Map<string, [number, number]>
+  /** The unique partition, in ladder order (run, group, run, group, …). */
+  blocks: Tile[][]
+  hinges: number[]
+  runCols: Tile['c'][]
+}
+
+export function buildChain(diff: Difficulty): ChainBuild | null {
+  const p = chainParamsFor(diff)
+  if (!p) return null
+  return buildChainAt(p.links)
+}
+
+/** links-parameterized chain core, exported for verification. */
+export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c'][]): ChainBuild | null {
+  if (links < 2 || links > 4) return null // 4 colours, and hinges are 3 apart
+  const runCols = (colsIn ?? shuffle(ALL_COLORS)).slice(0, links)
+  if (new Set(runCols).size !== links) return null
+  // last hinge = start + 2 + 3*(links-1) must fit in 1..13
+  const maxStart = 13 - (2 + 3 * (links - 1))
+  if (maxStart < 1) return null
+  const s = startIn ?? randomInt(1, maxStart)
+  if (s < 1 || s > maxStart) return null
+
+  const blocks: Tile[][] = []
+  const hinges: number[] = []
+  const used = new Set<string>()
+  const claim = (ts: Tile[]): boolean => {
+    for (const t of ts) if (used.has(`${t.n}_${t.c}`)) return false
+    ts.forEach(t => used.add(`${t.n}_${t.c}`))
+    blocks.push(ts)
+    return true
+  }
+
+  if (!claim([0, 1, 2].map(o => makeTile(s + o, runCols[0])))) return null
+  hinges.push(s + 2)
+  for (let i = 1; i < links; i++) {
+    const h = hinges[i - 1]
+    // group at h = the three colours OTHER than the one that just ran into h.
+    // The next run colour is one of them, so its hinge tile sits in this group —
+    // that is exactly what delays the next run's determination.
+    const groupCols = ALL_COLORS.filter(c => c !== runCols[i - 1])
+    if (!groupCols.includes(runCols[i])) return null
+    if (!claim(groupCols.map(c => makeTile(h, c)))) return null
+    if (!claim([1, 2, 3].map(o => makeTile(h + o, runCols[i])))) return null
+    hinges.push(h + 3)
+  }
+  const lastH = hinges[hinges.length - 1]
+  if (!claim(ALL_COLORS.filter(c => c !== runCols[links - 1]).map(c => makeTile(lastH, c)))) return null
+
+  // ---- the board: every run block EXTENDED by its hinge tile (a longer, still
+  // valid run — this is what hides the ladder), plus the FINAL group as a row.
+  // The final group must sit on the board: left in the rack it would be a valid
+  // set on its own and break invariant (c).
+  const isRun = (b: Tile[]) => b.every(t => t.c === b[0].c)
+  const boardRows: Tile[][] = []
+  const onBoard = new Set<string>()
+  for (const b of blocks) {
+    if (!isRun(b)) continue
+    const c = b[0].c
+    const lo = Math.min(...b.map(t => t.n))
+    const hinge = blocks.flat().find(t => t.c === c && t.n === lo - 1)
+    const row = hinge ? [hinge, ...b] : [...b]
+    if (!isValidRun(row)) return null
+    boardRows.push(row)
+    row.forEach(t => onBoard.add(`${t.n}_${t.c}`))
+  }
+  const finalGroup = blocks[blocks.length - 1]
+  if (finalGroup.some(t => onBoard.has(`${t.n}_${t.c}`))) return null
+  boardRows.push(finalGroup)
+  finalGroup.forEach(t => onBoard.add(`${t.n}_${t.c}`))
+
+  const allTiles = blocks.flat()
+  const rack = allTiles.filter(t => !onBoard.has(`${t.n}_${t.c}`))
+
+  // ---- the defining gates, in the order that fails cheapest first
+  if (chainPartitionCount(allTiles, 2) !== 1) return null           // must be UNIQUE
+  const chain = localChainDepth(allTiles)
+  if (chain.stalled) return null                                    // must be fully solvable by local reasoning
+  if (chain.depth < 2 * links) return null                          // the ladder's full depth
+  if (chain.genuine < 2 * links - 1) return null                    // and genuinely non-obvious steps
+
+  const freshRows = blocks.filter(b => !isRun(b)).length - 1        // final group is on the board
+  const rows = 1 + boardRows.length + freshRows + 1
+  const cols = Math.max(...boardRows.map(r => r.length)) + 2
+  const grid: Grid = Array.from({ length: rows }, () => Array(cols).fill(null))
+  boardRows.forEach((row, r) => row.forEach((t, i) => { grid[1 + r][1 + i] = t }))
+
+  if (!validateGrid(grid)) return null                              // (a)
+  if (formsValidSetAlone(rack)) return null                         // (c)
+  if (!solveBagM2(allTiles).solvable) return null                   // (b)
+  const search = existsNoRelocationWin(grid, rack)
+  if (search.win || search.exhausted) return null                   // (d)
+
+  // ---- goal layout: every block that already sits contiguously on a board row
+  // keeps those cells; the remaining groups are assembled on fresh rows.
+  const windows: WindowSpec[] = blocks.map(b => isRun(b)
+    ? { type: 'run', color: b[0].c, start: Math.min(...b.map(t => t.n)), length: b.length }
+    : { type: 'group', value: b[0].n, colors: b.map(t => t.c) })
+  const cells: [number, number][][] = []
+  let fresh = boardRows.length
+  for (const b of blocks) {
+    const rowIdx = boardRows.findIndex(row => b.every(t => row.some(x => x.n === t.n && x.c === t.c)))
+    if (rowIdx >= 0) {
+      const row = boardRows[rowIdx]
+      const off = row.findIndex(t => t.n === b[0].n && t.c === b[0].c)
+      cells.push(b.map((_, i): [number, number] => [1 + rowIdx, 1 + off + i]))
+    } else {
+      const r = ++fresh
+      cells.push(b.map((_, i): [number, number] => [r, 1 + i]))
+    }
+  }
+  const res = bindMinCostGoal(windows, grid, rack, (wi, i) => cells[wi][i])
+  if (!res || !res.reachedGoal || !res.validGoal) return null       // (e)
+
+  return { grid, rack, allTiles, minMoves: res.moves, goal: res.goal, blocks, hinges, runCols }
+}
+
+/** Every valid set (run or group) inside `bag` containing `t`. m=1 only — the
+ * chain archetype builds no duplicates, so a (value,colour) map is exact. */
+function chainCandidateBlocks(bag: Tile[], t: Tile): Tile[][] {
+  const out: Tile[][] = []
+  const sameColour = new Map<number, Tile>()
+  for (const x of bag) if (x.c === t.c) sameColour.set(x.n, x)
+  let lo = t.n; while (sameColour.has(lo - 1)) lo--
+  let hi = t.n; while (sameColour.has(hi + 1)) hi++
+  for (let a = lo; a <= t.n; a++) for (let b = t.n; b <= hi; b++) {
+    if (b - a + 1 < 3) continue
+    const run: Tile[] = []
+    for (let v = a; v <= b; v++) run.push(sameColour.get(v)!)
+    if (isValidRun(run)) out.push(run)
+  }
+  const others = bag.filter(x => x.n === t.n && x.c !== t.c)
+  for (const size of [2, 3]) {
+    for (const rest of combinations(others, size)) {
+      const g = [t, ...rest]
+      if (isValidGroup(g)) out.push(g)
+    }
+  }
+  return out
+}
+
+const chainWithout = (bag: Tile[], block: Tile[]): Tile[] => {
+  const ids = new Set(block.map(t => `${t.n}_${t.c}`))
+  return bag.filter(x => !ids.has(`${x.n}_${x.c}`))
+}
+
+/** Number of distinct run/group partitions, capped (we only need "exactly 1"). */
+function chainPartitionCount(bag: Tile[], cap = 2): number {
+  let found = 0
+  const rec = (rest: Tile[]) => {
+    if (found >= cap) return
+    if (rest.length === 0) { found++; return }
+    for (const b of chainCandidateBlocks(rest, rest[0])) {
+      rec(chainWithout(rest, b))
+      if (found >= cap) return
+    }
+  }
+  rec(bag)
+  return found
+}
+
+/**
+ * The LOCAL (myopic) deduction cascade. Each round, every tile with exactly ONE
+ * remaining candidate set is determined and its block committed; removing those
+ * tiles is what unlocks the next round. `genuine` counts rounds after the first
+ * that determined at least one tile which had ≥2 candidates at move zero — a
+ * round that only resolves already-obvious tiles is not a chain link.
+ */
+function localChainDepth(bag: Tile[]): { depth: number; stalled: boolean; genuine: number } {
+  const initial = new Map<string, number>()
+  for (const t of bag) initial.set(`${t.n}_${t.c}`, chainCandidateBlocks(bag, t).length)
+  let rest = [...bag]
+  const rounds: number[][] = []
+  let guard = 0
+  while (rest.length > 0 && guard++ < 60) {
+    const forced: Tile[][] = []
+    const amb: number[] = []
+    for (const t of rest) {
+      const c = chainCandidateBlocks(rest, t)
+      if (c.length === 1) { forced.push(c[0]); amb.push(initial.get(`${t.n}_${t.c}`)!) }
+    }
+    const genuineOf = (rs: number[][]) => rs.slice(1).filter(r => r.some(n => n >= 2)).length
+    if (forced.length === 0) return { depth: rounds.length, stalled: true, genuine: genuineOf(rounds) }
+    const rm = new Set<string>()
+    for (const b of forced) for (const x of b) rm.add(`${x.n}_${x.c}`)
+    rounds.push(amb)
+    rest = rest.filter(x => !rm.has(`${x.n}_${x.c}`))
+  }
+  return { depth: rounds.length, stalled: false, genuine: rounds.slice(1).filter(r => r.some(n => n >= 2)).length }
+}
+
 /**
  * Cut offsets (1-based, relative to the run's first value) that are UNIQUELY
  * solvable AND hit the target par, per run length L. Verified exhaustively by
