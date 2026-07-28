@@ -20,9 +20,11 @@ interface Props {
   soundEnabled: boolean
   onShowSettings: () => void
   onShowTutorial: () => void
+  /** Persisted board-scale preference; 1 = the original 46x58 rendering. */
+  boardScale?: number
 }
 
-export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, onShowTutorial }: Props) {
+export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, onShowTutorial, boardScale = 1 }: Props) {
   const { grid, rack, moves, undos, won, invalidCells, drop, undo, reset, loadPuzzle } = usePlayState()
   const { drag, startDrag, updatePos, endDrag } = useDrag()
   const tileStyle = useContext(TileStyleContext)
@@ -201,7 +203,13 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
               moves: {moves}&nbsp;&nbsp;par: {currentPuzzle?.optimalMoves ?? '—'}&nbsp;&nbsp;rack: {rack.length}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', margin: '0 0 16px' }}>
+            {/*
+              Board owns its own centring now (it has to, because the same
+              element is the horizontal scroll container). `minWidth: 0` lets
+              this flex item actually shrink below its content width — without
+              it the board would overflow the page instead of scrolling.
+            */}
+            <div style={{ margin: '0 0 16px', minWidth: 0 }}>
               <Board
                 grid={grid}
                 drag={drag}
@@ -211,6 +219,7 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
                 onCellLeave={() => setHoverTarget(null)}
                 invalidCells={invalidCells}
                 lockInCells={lockInCells}
+                scale={boardScale}
               />
             </div>
 
@@ -220,6 +229,7 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
               onTileMouseDown={startDrag}
               onRackEnter={() => setHoverTarget({ to: 'rack' })}
               onRackLeave={() => setHoverTarget(null)}
+              scale={boardScale}
             />
 
             {won && (
@@ -249,7 +259,7 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
         )}
       </div>
 
-      {drag && <DragPreview drag={drag} tileStyle={tileStyle} />}
+      {drag && <DragPreview drag={drag} tileStyle={tileStyle} scale={boardScale} />}
 
       {showConfetti && (
         <div

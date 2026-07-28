@@ -1,6 +1,7 @@
 import type { Tile } from '../types'
 import { NUM_COLOR } from '../types'
 import type { TileStyle } from '../lib/themes'
+import { tileMetrics } from '../lib/boardScale'
 
 interface Props {
   tile: Tile
@@ -9,6 +10,12 @@ interface Props {
   lockIn?: boolean
   dimmed?: boolean
   hovered?: boolean
+  /**
+   * Board-scale factor. Defaults to 1, so every existing call site renders at
+   * exactly the original 46x58. Sizes are REAL pixel dimensions, never a
+   * `transform: scale()` — see src/lib/boardScale.ts for why that matters.
+   */
+  scale?: number
 }
 
 // RGB components matching NUM_COLOR hex values
@@ -52,8 +59,9 @@ const PAPER_TEXT: Record<Tile['c'], string> = {
   k: '#3a3a35',
 }
 
-export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dimmed = false, hovered = false }: Props) {
+export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dimmed = false, hovered = false, scale = 1 }: Props) {
   const [rr, gg, bb] = COLOR_RGB[tile.c]
+  const m = tileMetrics(scale)
 
   const dimStyle: React.CSSProperties = dimmed ? { opacity: 0.35, transform: 'scale(0.93)' } : {}
 
@@ -75,13 +83,13 @@ export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dim
       <div
         className={animClass}
         style={{
-          width: 46, height: 58, borderRadius: 8,
+          width: m.w, height: m.h, borderRadius: m.radius(8),
           background: invalid ? 'var(--invalid-bg)' : 'var(--tile-bg)',
           boxShadow: lockIn ? undefined
             : invalid ? '0 0 0 1.5px var(--invalid-ring)'
             : 'var(--tile-shadow)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, fontWeight: 500,
+          fontSize: m.font, fontWeight: 500,
           color: NUM_COLOR[tile.c],
           userSelect: 'none',
           transition: 'background 0.15s ease, opacity 0.1s ease',
@@ -110,11 +118,11 @@ export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dim
       <div
         className={animClass}
         style={{
-          width: 46, height: 58, borderRadius: 8,
+          width: m.w, height: m.h, borderRadius: m.radius(8),
           background: bg, border,
           boxShadow: lockIn ? undefined : shadow,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, fontWeight: 500, color: '#ffffff',
+          fontSize: m.font, fontWeight: 500, color: '#ffffff',
           userSelect: 'none', animation: landAnim, boxSizing: 'border-box',
           ...hoverOutline, ...dimStyle,
         }}
@@ -135,12 +143,12 @@ export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dim
       <div
         className={animClass}
         style={{
-          width: 46, height: 58, borderRadius: 6,
+          width: m.w, height: m.h, borderRadius: m.radius(6),
           background: `linear-gradient(180deg, ${cd.light}, ${cd.mid})`,
           border: '1px solid rgba(0,0,0,0.08)',
           boxShadow: shadow,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, fontWeight: 500, color: cd.text,
+          fontSize: m.font, fontWeight: 500, color: cd.text,
           userSelect: 'none', animation: landAnim, boxSizing: 'border-box',
           ...hoverOutline, ...dimStyle,
         }}
@@ -159,12 +167,12 @@ export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dim
       <div
         className={animClass}
         style={{
-          width: 46, height: 58, borderRadius: 6,
+          width: m.w, height: m.h, borderRadius: m.radius(6),
           background: '#0d0d14',
           border: `1px solid ${nc}`,
           boxShadow: lockIn ? undefined : shadow,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, fontWeight: 500, color: textColor,
+          fontSize: m.font, fontWeight: 500, color: textColor,
           textShadow: `0 0 6px ${nc}cc`,
           userSelect: 'none', animation: landAnim, boxSizing: 'border-box',
           ...hoverOutline, ...dimStyle,
@@ -184,12 +192,12 @@ export function TileFace({ tile, tileStyle, invalid = false, lockIn = false, dim
     <div
       className={animClass}
       style={{
-        width: 46, height: 58, borderRadius: 2,
+        width: m.w, height: m.h, borderRadius: m.radius(2),
         background: '#fdfaf2',
         border: paperBorder,
         boxShadow: lockIn ? undefined : paperShadow,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 20, fontWeight: 500,
+        fontSize: m.font, fontWeight: 500,
         fontFamily: 'Georgia, serif',
         color: PAPER_TEXT[tile.c],
         userSelect: 'none', animation: landAnim, boxSizing: 'border-box',

@@ -2,6 +2,8 @@ import {
   THEME_PRESETS, PRESET_LABELS, BACKGROUND_LABELS, TILE_LABELS,
 } from '../lib/themes'
 import type { BackgroundStyle, TileStyle, ThemePreset } from '../lib/themes'
+import { BOARD_SCALES, formatBoardScale } from '../lib/boardScale'
+import type { BoardScale } from '../lib/boardScale'
 
 type ThemeOption = 'light' | 'dark' | 'system'
 
@@ -15,6 +17,8 @@ interface Props {
   onSelectPreset: (p: ThemePreset) => void
   onBackgroundChange: (b: BackgroundStyle) => void
   onTileStyleChange: (t: TileStyle) => void
+  boardScale: BoardScale
+  onBoardScaleChange: (s: BoardScale) => void
   onClose: () => void
 }
 
@@ -43,6 +47,7 @@ export function SettingsPanel({
   soundEnabled, setSoundEnabled,
   background, tileStyle,
   onSelectPreset, onBackgroundChange, onTileStyleChange,
+  boardScale, onBoardScaleChange,
   onClose,
 }: Props) {
   return (
@@ -170,6 +175,41 @@ export function SettingsPanel({
                   </button>
                 )
               })}
+            </div>
+          </div>
+
+          {/* Board */}
+          <div>
+            <SectionLabel>Board</SectionLabel>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              Tile size
+            </div>
+            <div style={{
+              display: 'flex', border: '0.5px solid var(--border)',
+              borderRadius: 10, overflow: 'hidden',
+            }}>
+              {BOARD_SCALES.map(s => {
+                const active = boardScale === s
+                return (
+                  <button
+                    key={s}
+                    onClick={() => onBoardScaleChange(s)}
+                    style={{
+                      flex: 1, padding: '6px 4px',
+                      border: 'none', fontSize: 12, cursor: 'pointer',
+                      background: active ? 'var(--cell-empty)' : 'var(--surface)',
+                      color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      fontWeight: active ? 500 : 400,
+                    }}
+                  >
+                    {formatBoardScale(s)}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.4 }}>
+              Smaller tiles fit wide boards on narrow screens. Wide boards scroll
+              sideways at any size.
             </div>
           </div>
 

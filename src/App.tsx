@@ -5,6 +5,8 @@ import {
   THEME_PRESETS, TileStyleContext,
 } from './lib/themes'
 import type { BackgroundStyle, TileStyle, ThemePreset } from './lib/themes'
+import { BOARD_SCALE_KEY, parseBoardScale } from './lib/boardScale'
+import type { BoardScale } from './lib/boardScale'
 import { LibraryScreen } from './screens/LibraryScreen'
 import { PlayScreen } from './screens/PlayScreen'
 import { EditorScreen } from './screens/EditorScreen'
@@ -71,6 +73,12 @@ function App() {
   const [tileStyle, setTileStyle] = useState<TileStyle>(
     () => (localStorage.getItem('puzzikub_tile_style') as TileStyle | null) ?? 'plain'
   )
+  // Board scale — same persistence pattern as background/tileStyle above.
+  // Validated on read (unlike those two) because an unrecognised number would
+  // otherwise reach the layout math; anything unknown falls back to 100%.
+  const [boardScale, setBoardScale] = useState<BoardScale>(
+    () => parseBoardScale(localStorage.getItem(BOARD_SCALE_KEY))
+  )
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', resolveTheme(theme))
@@ -96,6 +104,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('puzzikub_tile_style', tileStyle)
   }, [tileStyle])
+
+  useEffect(() => {
+    localStorage.setItem(BOARD_SCALE_KEY, String(boardScale))
+  }, [boardScale])
 
   function selectPreset(p: ThemePreset) {
     const cfg = THEME_PRESETS[p]
@@ -135,6 +147,7 @@ function App() {
               soundEnabled={soundEnabled}
               onShowSettings={() => setSettingsOpen(true)}
               onShowTutorial={() => setShowTutorial(true)}
+              boardScale={boardScale}
             />
           )}
           {screen === 'library' && (
@@ -172,6 +185,8 @@ function App() {
               onSelectPreset={selectPreset}
               onBackgroundChange={setBackground}
               onTileStyleChange={setTileStyle}
+              boardScale={boardScale}
+              onBoardScaleChange={setBoardScale}
               onClose={() => setSettingsOpen(false)}
             />
           )}

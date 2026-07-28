@@ -2,6 +2,7 @@ import { useContext } from 'react'
 import type { Tile, DragSrc } from '../types'
 import type { DragState } from '../hooks/useDrag'
 import { TileStyleContext } from '../lib/themes'
+import { tileMetrics } from '../lib/boardScale'
 import { TileFace } from './TileFace'
 
 interface Props {
@@ -10,10 +11,13 @@ interface Props {
   onTileMouseDown: (e: React.MouseEvent, tile: Tile, src: DragSrc) => void
   onRackEnter: () => void
   onRackLeave: () => void
+  /** Board-scale preference — rack tiles must match board tiles exactly. */
+  scale?: number
 }
 
-export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave }: Props) {
+export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave, scale = 1 }: Props) {
   const tileStyle = useContext(TileStyleContext)
+  const m = tileMetrics(scale)
   // m=2 migration Step 9 — POSITIONAL, and it must stay that way.
   //
   // This compares the dragged tile's rack INDEX to the index being rendered. Two
@@ -33,13 +37,16 @@ export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave }:
         onMouseLeave={onRackLeave}
         style={{
           background: 'var(--rack-bg)',
-          borderRadius: 12,
-          padding: 12,
+          borderRadius: m.radius(12),
+          padding: m.radius(12),
           display: 'flex',
-          gap: 8,
+          gap: m.radius(8),
           flexWrap: 'wrap',
-          minHeight: 70,
+          minHeight: m.h + m.radius(12) * 2,
           transition: 'background 0.15s ease',
+          // TOUCH GROUNDWORK — rack BACKGROUND is empty space, so it pans.
+          // The tile wrappers below opt out individually.
+          touchAction: 'pan-x pan-y',
         }}
       >
         {tiles.map((tile, i) => (
@@ -51,13 +58,16 @@ export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave }:
             // TILE_COPIES; legacy migration mints distinct copies), so this is a
             // valid sibling key even with both copies of a duplicate in the rack.
             key={tile.id}
-            style={{ cursor: 'grab', userSelect: 'none' }}
+            // TOUCH GROUNDWORK — a rack tile is draggable, so like an occupied
+            // board cell it opts out of native panning.
+            style={{ cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
             onMouseDown={e => onTileMouseDown(e, tile, { from: 'rack', rackIdx: i })}
           >
             <TileFace
               tile={tile}
               tileStyle={tileStyle}
               dimmed={draggingRackIdx === i}
+              scale={scale}
             />
           </div>
         ))}
