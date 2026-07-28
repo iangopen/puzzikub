@@ -10,6 +10,7 @@ interface Props {
   drag: DragState | null
   hoveredCell: { row: number; col: number } | null
   onTileMouseDown: (e: React.MouseEvent, tile: Tile, src: DragSrc) => void
+  onTileTouchStart: (e: React.TouchEvent, tile: Tile, src: DragSrc) => void
   onCellEnter: (row: number, col: number) => void
   onCellLeave: () => void
   invalidCells: Set<string>
@@ -18,7 +19,7 @@ interface Props {
   scale?: number
 }
 
-export function Board({ grid, drag, hoveredCell, onTileMouseDown, onCellEnter, onCellLeave, invalidCells, lockInCells, scale = 1 }: Props) {
+export function Board({ grid, drag, hoveredCell, onTileMouseDown, onTileTouchStart, onCellEnter, onCellLeave, invalidCells, lockInCells, scale = 1 }: Props) {
   const tileStyle = useContext(TileStyleContext)
   const m = tileMetrics(scale)
 
@@ -44,11 +45,25 @@ export function Board({ grid, drag, hoveredCell, onTileMouseDown, onCellEnter, o
         cells.push(
           <div
             key={isInvalid ? `${r}-${c}-${shakeKey}` : `${r}-${c}`}
+            // TOUCH DROP TARGET. Touch events use IMPLICIT CAPTURE — every
+            // touchmove/touchend after touchstart dispatches to the ORIGINAL
+            // element regardless of where the finger actually is — so there is
+            // no touch equivalent of onMouseEnter. PlayScreen hit-tests with
+            // document.elementFromPoint and resolves the result through
+            // .closest('[data-cell],[data-rack]'); without this attribute the
+            // hit-test lands on a div with nothing to identify it.
+            data-cell={`${r},${c}`}
             // TOUCH GROUNDWORK — see the container comment below. An OCCUPIED
             // cell is reserved for dragging, so it opts out of native touch
             // panning entirely.
-            style={{ cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
+            style={{
+              cursor: 'grab',
+              userSelect: 'none',
+              touchAction: 'none',
+              WebkitTapHighlightColor: 'transparent',
+            }}
             onMouseDown={e => onTileMouseDown(e, tile, { from: 'grid', row: r, col: c })}
+            onTouchStart={e => onTileTouchStart(e, tile, { from: 'grid', row: r, col: c })}
             onMouseEnter={() => onCellEnter(r, c)}
             onMouseLeave={onCellLeave}
           >
@@ -68,6 +83,9 @@ export function Board({ grid, drag, hoveredCell, onTileMouseDown, onCellEnter, o
           <div
             key={`empty-${r}-${c}`}
             className="cell-idle"
+            // Same touch drop-target marker as the occupied branch above — an
+            // empty cell is the most common drop destination of all.
+            data-cell={`${r},${c}`}
             style={{
               width: m.w,
               height: m.h,

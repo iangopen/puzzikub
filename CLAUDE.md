@@ -437,22 +437,41 @@ Win condition: `rack.length === 0 && validateGrid(grid)` only.
 ---
 
 ## Drag system — CRITICAL RULES, NEVER VIOLATE
-Pure mouse events. NO HTML5 drag API, NO draggable attribute,
-NO setPointerCapture. onMouseEnter/Leave for drop-target detection
-(not elementFromPoint). data-nodrag="" on every tile. main.tsx has
-global capture-phase dragstart preventDefault + mousedown preventDefault
-via [data-nodrag] closest-check.
+Plain mouse events + plain touch events, as two explicit paths sharing one
+core. **NO HTML5 drag API, NO draggable attribute, NO Pointer Events, NO
+setPointerCapture** — the capture model was abandoned here after real pain and
+must not come back; unifying mouse and touch via Pointer Events would reinstate
+it, which is exactly why the touch path is written separately.
+
+Drop-target detection differs by input, deliberately:
+- **mouse** — `onMouseEnter`/`onMouseLeave` on cells, as always.
+- **touch** — `document.elementFromPoint` during `touchmove` ONLY, resolved via
+  `.closest('[data-cell],[data-rack]')`. Touch has no `onMouseEnter` analogue
+  because of implicit capture (below). Never hit-test at `touchend`.
+
+Both paths then read the SAME accumulated `hoverTargetRef` at drop time.
+
+*Two claims that used to live here were FALSE and were removed (verified by
+reading the files, and corrected in the touch-drag session):* there is no
+`data-nodrag` attribute anywhere in `src/` and never was, and `main.tsx` has no
+mousedown/`[data-nodrag]` guard. **`main.tsx` is 12 lines and contains exactly
+one global listener — capture-phase `dragstart` → `preventDefault`.** Do not
+"restore" the mousedown guard or the `data-nodrag` attributes; they are phantom
+code. Mouse-drag text selection is suppressed by `preventDefault()` inside
+`startDrag` plus `user-select: none`, which is sufficient and is what actually
+ships.
 
 ---
 
-## MOBILE / TOUCH — GROUNDWORK ONLY. Touch drag handlers are NOT written yet.
-*Session after the CHAIN archetype. UI-only: nothing in `src/lib/` changed
-behaviourally, and the whole harness suite is unchanged (counts below).*
+## MOBILE / TOUCH — COMPLETE. Touch drag is implemented, verified, and shipping.
+*Two sessions after the CHAIN archetype: (1) groundwork — scroll container,
+board scale, touch-action split; (2) the touch drag itself. Both UI-only:
+nothing in `src/lib/` changed behaviourally, whole harness suite unchanged.*
 
-**What this session shipped:** a scrollable/pannable board container, a
-persisted board-scale preference, and the touch-action split the future touch
-drag depends on. **What it deliberately did NOT ship: any
-touchstart/touchmove/touchend handler.** That is the next session.
+**The game is now playable by touch end to end.** A finger on a tile drags it;
+a finger on empty space pans the board. Both were verified with real dispatched
+touch events, including the failure modes that make touch hard (compatibility
+mouse events, touchcancel, multi-touch).
 
 ### THE TOUCH-ACTION SPLIT — the contract the next session depends on
 Panning and tile-dragging need NO competing gesture code, because they are
@@ -545,18 +564,125 @@ each rack tile twice (wrapper + `TileFace`); and on a fresh browser profile the
 `pairingMin` **31/0** with all seven par numbers EXACT · `storage` **37/0** ·
 `dragIdentity` **29/0**. `npm run build` clean (`107 modules transformed`).
 
-### Still open for the NEXT session
-- **The actual touch drag**: `touchstart`/`touchmove`/`touchend` on tiles,
-  mirroring the mouse path in `useDrag.ts` + `PlayScreen`'s document listeners.
-  The CSS contract above is what makes this straightforward; do not re-litigate
-  it. Note `PlayScreen`'s drop handler closes over `hoverTarget` state — the
-  same staleness that bites automated mouse drags will bite touch.
-- `elementFromPoint` will likely be needed for touch drop targets, since
-  `onMouseEnter` has no touch equivalent. That is the one place the mouse and
-  touch paths genuinely diverge.
-- A responsive `Board.tsx` (the older open item) is now partly addressed —
-  scale + scroll make L=13 viable on desktop, though the cut-point L≤10 cap is
-  still enforced in `archetypes.ts` and was NOT changed here.
+---
+
+## THE TOUCH DRAG — how it works, and the five traps it had to survive
+*Session 2 of the mobile arc. Files: `useDrag.ts`, `PlayScreen.tsx`,
+`Board.tsx`, `Rack.tsx`, `DragPreview.tsx`, `index.css`.*
+
+### Structure: ONE core, TWO thin wrappers
+```ts
+startDragAt(tile, src, x, y, pointer, touchId?)   // shared core — the only new logic
+startDrag(e, tile, src)                            // mouse wrapper, behaviour UNCHANGED
+startDragTouch(e, tile, src)                       // touch wrapper, NO preventDefault
+```
+`updatePos`, `endDrag`, `drop()` in `usePlayState`, and every Board/Rack/
+TileFace/DragPreview render path were **already coordinate-based and were reused
+verbatim** — confirmed by reading, not assumed. Nothing was duplicated.
+
+`startDragTouch` deliberately does **not** call `preventDefault`: scroll
+suppression is `touch-action: none` on tiles (the groundwork contract), not JS.
+
+### Trap 1 — implicit capture. Touch has no `onMouseEnter`.
+Every `touchmove`/`touchend` after `touchstart` dispatches to the **ORIGINAL**
+element regardless of where the finger is. So the touch path hit-tests with
+`document.elementFromPoint(...)` **during `touchmove` ONLY**, resolved through
+`.closest('[data-cell],[data-rack]')`. `data-cell="r,c"` is on **both** Board
+branches (occupied and empty) and `data-rack` on the rack container — these were
+added this session; cells previously had only React keys.
+
+***The drop NEVER hit-tests.*** Both inputs commit the LAST hover recorded
+during movement, via one shared `commitDrop`. Hit-testing at `touchend` would
+diverge from the mouse path and is unreliable anyway — a finger lifted a pixel
+outside a cell would silently drop nowhere.
+
+### Trap 2 — React attaches touch listeners as PASSIVE
+`touchmove`, `touchend` **and** `touchcancel` are native
+`document.addEventListener(..., { passive: false })` calls, mirroring the
+existing mouse effect. **A `preventDefault()` inside a React `onTouchMove`
+silently does nothing** (React 17+ registers root touch listeners as passive).
+`onTouchStart` is fine as a React prop — it never needs `preventDefault`.
+
+### Trap 3 — compatibility mouse events (the highest-risk item)
+After `touchend`, browsers synthesise `mousedown`/`mousemove`/`mouseup`/`click`
+at the same coordinates. Unguarded, one tap-drag fires the drag logic TWICE.
+`touchEndedAtRef` records the touch-drag end and mouse input is ignored for
+`TOUCH_MOUSE_SUPPRESS_MS` (500). The mouse effect is additionally scoped to
+`drag.pointer === 'mouse'` so a synthetic `mouseup` can never end a touch drag.
+**Not solved with Pointer Events** — that reinstates the `setPointerCapture`
+model this project abandoned.
+
+### Trap 4 — `touchcancel` (system gesture, notification, incoming call)
+Without it `endDrag()` never runs and `document.body`'s `userSelect`/`cursor`
+stay mutated forever with the preview stranded on screen. Its identifier check
+is deliberately **LOOSER than `touchend`'s**: cancel if our finger is named in
+`changedTouches` **OR** is simply no longer active, because browsers differ in
+what a `touchcancel` carries (Chrome's CDP won't even accept touch points on
+one). Being strict here risks the exact hang the handler exists to prevent.
+`touchend` stays strict — there a wrong match would drop a tile.
+
+### Trap 5 — multi-touch
+`DragState.touchId` records the initiating `Touch.identifier`, and every later
+event locates **that same identifier** in `touches`/`changedTouches`.
+***Never index `touches[0]`*** — a second finger reorders those lists and the
+drag would jump to the wrong finger. `changedTouches[0]` is correct in exactly
+one place: inside `startDragTouch`, where that list holds only the finger that
+just landed.
+
+### ⚠️ The latent MOUSE bug fixed here too — `hoverTargetRef`
+`PlayScreen`'s mouseup effect re-subscribed on `[drag, hoverTarget]`, so an
+event arriving before React re-rendered read a **stale** hover target and
+dropped on the wrong cell. That is the bug that forced a ~170-220ms settle in
+earlier automated-drag sessions. Fix: `hoverTargetRef` is written
+**synchronously** alongside `setHoverTarget` (state still drives rendering) and
+`commitDrop` reads the **ref**. `hoverTarget` is out of the effect deps.
+**Always write hover through `setHover` so the two cannot diverge.**
+Measured: **8/8 rapid mouse drags with ZERO settle now land on the correct
+cell**, where the settle used to be mandatory.
+
+### Smaller items
+- `DragPreview` lifts the tile **above** the finger on touch (`TOUCH_LIFT` 28px
+  on top of the usual half-tile offset) — a fingertip contact patch is wider
+  than a 46px tile and completely hides it at the mouse's dead-centre offset.
+  Mouse offset is unchanged.
+- `index.css` `*` rule gained `-webkit-user-select: none` (Safari/iOS still
+  needs the prefix); tiles gained `-webkit-tap-highlight-color: transparent`.
+
+### Verification (real executed output, CDP `Input.dispatchTouchEvent`)
+```
+TOUCH-DRAG CHECKS: 26 passed, 0 failed
+  1 rack -> board by touch: tile lands, rack -1, moves +1, body styles restored
+  2 board -> board by touch: tile moves, source cell empties, moves +1
+  3 COMPAT: synthesised mouse after touchend changed NOTHING; and after the
+    500ms window expires, mouse drags work again (guard expires, never wedges)
+  4 touchcancel: userSelect "none" -> "", cursor "grabbing" -> "", NO drop
+  5 MULTI-TOUCH: 2nd finger mid-drag; lifting it dropped nothing; the tile
+    landed at the ORIGINAL finger's target; decoy cell stayed empty; 1 move
+  6 MOUSE: 8/8 zero-settle drags landed on the correct cell
+  7 touch drag at 50% scale on a 390px viewport
+MOBILE-GROUNDWORK CHECKS: 33 passed, 0 failed   (re-run, unchanged)
+WIDE-BOARD CHECKS:        15 passed, 0 failed   (re-run, unchanged)
+```
+*Rig: the groundwork session's `cdp.mjs` + `verify-mobile.mjs`/`verify-wide.mjs`,
+extended with `verify-touch.mjs`. Node 24's global `WebSocket` drives Chrome
+over CDP — no dependency. **CDP gotcha: `touchCancel` must be dispatched with an
+EMPTY `touchPoints` array** or the protocol rejects it.*
+
+*Engine untouched — all ten harnesses re-run:* `verifyEngine` **53/0** +
+invariants (a)-(d) · `decoy` **23/0** · `redherring` **25/0** · `composed`
+**32/0** · `cutpoint` **36/0** · `chain` **28/0** · `mixedGoalPlanner` **37/0** ·
+`storage` **37/0** · `dragIdentity` **29/0** · `pairingMin` **31/0** with ALL
+SEVEN PAR NUMBERS UNCHANGED. `npm run build` clean.
+
+### Still open
+- **Real-device testing has NOT happened.** Everything above is Chrome's touch
+  emulation via CDP, which dispatches genuine `TouchEvent`s but is not iOS
+  Safari. The likeliest real-device gaps are Safari's compatibility-event
+  timing (the 500ms window is a judgement call, not a measured iOS value) and
+  momentum-scroll interaction with the pan container.
+- A responsive `Board.tsx` is now partly addressed — scale + scroll make L=13
+  viable, though the cut-point L≤10 cap in `archetypes.ts` was NOT changed.
+- The Library **Play** button bug is still open and still unrelated.
 
 ---
 

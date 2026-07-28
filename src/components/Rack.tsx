@@ -9,13 +9,14 @@ interface Props {
   tiles: Tile[]
   drag: DragState | null
   onTileMouseDown: (e: React.MouseEvent, tile: Tile, src: DragSrc) => void
+  onTileTouchStart: (e: React.TouchEvent, tile: Tile, src: DragSrc) => void
   onRackEnter: () => void
   onRackLeave: () => void
   /** Board-scale preference — rack tiles must match board tiles exactly. */
   scale?: number
 }
 
-export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave, scale = 1 }: Props) {
+export function Rack({ tiles, drag, onTileMouseDown, onTileTouchStart, onRackEnter, onRackLeave, scale = 1 }: Props) {
   const tileStyle = useContext(TileStyleContext)
   const m = tileMetrics(scale)
   // m=2 migration Step 9 — POSITIONAL, and it must stay that way.
@@ -33,6 +34,10 @@ export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave, s
     <div>
       <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>rack</div>
       <div
+        // TOUCH DROP TARGET — the rack as a whole. Resolved by PlayScreen's
+        // .closest('[data-cell],[data-rack]') hit-test; see Board.tsx for why
+        // touch needs an attribute where mouse gets by with onMouseEnter.
+        data-rack=""
         onMouseEnter={onRackEnter}
         onMouseLeave={onRackLeave}
         style={{
@@ -60,8 +65,14 @@ export function Rack({ tiles, drag, onTileMouseDown, onRackEnter, onRackLeave, s
             key={tile.id}
             // TOUCH GROUNDWORK — a rack tile is draggable, so like an occupied
             // board cell it opts out of native panning.
-            style={{ cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
+            style={{
+              cursor: 'grab',
+              userSelect: 'none',
+              touchAction: 'none',
+              WebkitTapHighlightColor: 'transparent',
+            }}
             onMouseDown={e => onTileMouseDown(e, tile, { from: 'rack', rackIdx: i })}
+            onTouchStart={e => onTileTouchStart(e, tile, { from: 'rack', rackIdx: i })}
           >
             <TileFace
               tile={tile}

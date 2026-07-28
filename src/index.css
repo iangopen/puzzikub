@@ -34,6 +34,10 @@
   box-sizing: border-box;
   -webkit-user-drag: none;
   -webkit-touch-callout: none;
+  /* Safari/iOS still needs the prefixed form; the unprefixed `user-select` is
+     already applied inline on the elements that matter (tiles, cells). Without
+     this, a touch-drag on iOS can start a text selection over the tile. */
+  -webkit-user-select: none;
 }
 
 body {
