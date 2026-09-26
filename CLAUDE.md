@@ -533,6 +533,11 @@ So **50% is what makes the widest board fit a phone outright**; scrolling covers
 every case in between. 50% is the reason the preset list starts below 75%.
 
 ### Verification (real executed output)
+*HISTORICAL — this was the groundwork session's own run, with a rig that was
+later LOST (never committed). The current, re-runnable evidence is
+`npm run verify:mobile`: see "THE BROWSER VERIFICATION RIG" below. The ~220ms
+settle mentioned here is also obsolete — the `hoverTargetRef` fix removed it.*
+
 The Chrome extension was NOT connected this session, so the browser checks were
 driven over **CDP directly from Node** (Node 24 has a global `WebSocket`, so
 this needed no new dependency) — launch headless Chrome with
@@ -648,41 +653,117 @@ cell**, where the settle used to be mandatory.
 - `index.css` `*` rule gained `-webkit-user-select: none` (Safari/iOS still
   needs the prefix); tiles gained `-webkit-tap-highlight-color: transparent`.
 
-### Verification (real executed output, CDP `Input.dispatchTouchEvent`)
-```
-TOUCH-DRAG CHECKS: 26 passed, 0 failed
-  1 rack -> board by touch: tile lands, rack -1, moves +1, body styles restored
-  2 board -> board by touch: tile moves, source cell empties, moves +1
-  3 COMPAT: synthesised mouse after touchend changed NOTHING; and after the
-    500ms window expires, mouse drags work again (guard expires, never wedges)
-  4 touchcancel: userSelect "none" -> "", cursor "grabbing" -> "", NO drop
-  5 MULTI-TOUCH: 2nd finger mid-drag; lifting it dropped nothing; the tile
-    landed at the ORIGINAL finger's target; decoy cell stayed empty; 1 move
-  6 MOUSE: 8/8 zero-settle drags landed on the correct cell
-  7 touch drag at 50% scale on a 390px viewport
-MOBILE-GROUNDWORK CHECKS: 33 passed, 0 failed   (re-run, unchanged)
-WIDE-BOARD CHECKS:        15 passed, 0 failed   (re-run, unchanged)
-```
-*Rig: the groundwork session's `cdp.mjs` + `verify-mobile.mjs`/`verify-wide.mjs`,
-extended with `verify-touch.mjs`. Node 24's global `WebSocket` drives Chrome
-over CDP — no dependency. **CDP gotcha: `touchCancel` must be dispatched with an
-EMPTY `touchPoints` array** or the protocol rejects it.*
-
-*Engine untouched — all ten harnesses re-run:* `verifyEngine` **53/0** +
-invariants (a)-(d) · `decoy` **23/0** · `redherring` **25/0** · `composed`
-**32/0** · `cutpoint` **36/0** · `chain` **28/0** · `mixedGoalPlanner` **37/0** ·
-`storage` **37/0** · `dragIdentity` **29/0** · `pairingMin` **31/0** with ALL
-SEVEN PAR NUMBERS UNCHANGED. `npm run build` clean.
+### Verification — see "THE BROWSER VERIFICATION RIG" below
+*The touch-drag session's original "26 passed, 0 failed" came from scripts that
+lived in a temp scratch folder and were never committed — that evidence was
+LOST, and for a while CLAUDE.md cited a number nothing could reproduce. The rig
+was rebuilt and committed (next section); its numbers replace that one.*
 
 ### Still open
-- **Real-device testing has NOT happened.** Everything above is Chrome's touch
-  emulation via CDP, which dispatches genuine `TouchEvent`s but is not iOS
-  Safari. The likeliest real-device gaps are Safari's compatibility-event
+- **Real-device testing has STILL NOT happened — not on iOS Safari, not on any
+  physical phone.** Everything above is Chrome's touch emulation via CDP, which
+  dispatches genuine, trusted `TouchEvent`s through Chrome's real input pipeline
+  (hit-testing, `touch-action`, native panning) but is not iOS Safari. The
+  committed rig STRENGTHENS the emulated evidence; it does not change this fact. The likeliest real-device gaps are Safari's compatibility-event
   timing (the 500ms window is a judgement call, not a measured iOS value) and
   momentum-scroll interaction with the pan container.
 - A responsive `Board.tsx` is now partly addressed — scale + scroll make L=13
   viable, though the cut-point L≤10 cap in `archetypes.ts` was NOT changed.
 - The Library **Play** button bug is still open and still unrelated.
+
+
+---
+
+## THE BROWSER VERIFICATION RIG — committed, permanent, `npm run verify:mobile`
+*Rebuilt in the session after touch drag, because the originals were lost.*
+**`scripts/` is committed — do not rebuild it, run it.** Needs a local Chrome or
+Edge (`CHROME_PATH` overrides; `HEADFUL=1` shows the window). No dependencies:
+Node 24's global `WebSocket` speaks CDP; Vite's own `createServer` hosts the app.
+
+```
+scripts/lib/cdp.mjs            launch headless Chrome, CDP session, touch/mouse
+                               dispatch, in-page event recorder
+scripts/lib/app.mjs            dev server, openPlay(), DOM state reader, Checks
+scripts/verify-mobile.mjs      groundwork: touch-action split, presets, persistence
+scripts/verify-wide.mjs        cut-point 8x12 on a 390px phone: real touch panning
+scripts/verify-touch.mjs       touch drag, compat guard, cancel, multi-touch, mouse
+scripts/verify-mobile-all.mjs  what `npm run verify:mobile` runs (exit 1 on any FAIL)
+```
+Each `verify-*.mjs` also runs standalone (`node scripts/verify-touch.mjs`).
+
+### Why these checks can be trusted — and the traps the rebuild hit
+- **Every check asserts on what the PAGE RECEIVED, not only on what was sent.**
+  An in-page recorder (capture + bubble listeners on `window`) logs each
+  touch/mouse event's `isTrusted`, identifiers, `touches`, target, and whether
+  the app's `preventDefault` took effect. A dispatch that never reached the app
+  fails instead of passing vacuously.
+- **Mutation-tested.** Four deliberate breakages of `PlayScreen.tsx` were each
+  CAUGHT (then reverted, never committed): `findTouch` returning `list[0]` ->
+  multi-touch FAIL (preview jumped 412px to the wrong finger); compat guard at
+  0ms -> moves 0->2, a double action; no `touchcancel` listener -> body styles
+  stuck at `none`/`grabbing`; `touchmove` listener `passive: true` ->
+  preventDefault effective on 0/10 touchmoves. *Not mutation-tested:* the
+  `hoverTargetRef` stale-target fix (the 8/8 zero-settle check exercises it but
+  was not shown to fail without it).
+- ***CDP `touchEnd` lists the finger(s) being LIFTED*** — the opposite of the
+  intuitive reading. The first draft sent the *remaining* fingers and Chrome
+  lifted exactly those: "lift finger 2" released finger 1, which would have made
+  the multi-touch test lift the wrong finger. The driver self-check (section 0
+  of verify-touch) re-proves this contract on every run. `touchCancel` still
+  needs an EMPTY `touchPoints` array.
+- Chrome orders `touches` by identifier, so the multi-touch test uses ids 7
+  (dragging) and 3 (intruder): the intruder genuinely lands at `touches[0]`.
+- **Seed `localStorage` only AFTER the app has mounted.** React commits after the
+  `load` event and `App`'s mount effect writes the scale it read back to
+  storage, so seeding on `load` was silently overwritten with the previous run's
+  value — every preset then "measured" the wrong scale.
+- Measure tile sizes with `offsetWidth`/`offsetHeight`: the `tile-land` keyframe
+  (`scale 0.85 -> 1.05 -> 1`) makes `getBoundingClientRect` read ~47.6px mid-flight.
+- cut-point's rack is second copies, so no rack tile is unique by
+  `number|colour`; wide-board drops are asserted via board copy counts.
+- `?forceArchetype=cut-point` renders NO board until "medium" is clicked (the
+  screen mounts on easy, where the forced build deliberately fails).
+- Headless Chrome emits NO compatibility mouse events after a CDP touch, so the
+  compat test dispatches the mouse sequence itself; the recorder confirms it
+  reached the tile 53ms after touchend, inside the 500ms window.
+
+### Result (real executed output, `npm run verify:mobile`)
+```
+MOBILE-GROUNDWORK  42 passed, 0 failed
+  default 46x58; all six touch-action values via getComputedStyle; at each of
+  50/75/100/125%: tile, rack tile, empty cell = 23x29/35x44/46x58/58x73 LAYOUT
+  size, board width = cols*w+gaps+padding, transform "none" on scroller/grid/
+  cell/tile/rack tile, drag preview same size, TOUCH drag lands; MOUSE drag at
+  75/100/125%; "75%" pill stores 0.75, re-renders at 35px, survives reload;
+  stored "0.6" / "garbage" / "" fall back to 46px
+WIDE-BOARD         24 passed, 0 failed
+  cut-point confirmed via console, 8x12, scrollWidth 650, client 350, pan 300;
+  column 0 fully visible at scrollLeft 0 (safe center); REAL touch swipes on the
+  board background pan to scrollLeft 300 (col 11 visible) and back to 0; a swipe
+  from an empty cell pans; a swipe from a TILE does not pan, it drags; rack tile
+  touch-dropped into column 11 after panning; 50% has no overflow, all 12
+  columns visible, touch drop into column 11
+TOUCH-DRAG         54 passed, 0 failed
+  0 driver self-check: trusted events, ids, lift semantics, touches order
+  1 rack->board: 1/10/1 trusted events; implicit capture shown (every touchmove
+    targets the rack); preventDefault effective 10/10; preview lifted (bottom
+    150 vs finger 178); tile in cell, rack 2->1, moves 0->1, styles restored
+  2 board->board  3 swap (one move)  4 board->rack
+  5 COMPAT: mouse 53ms after touchend reached the tile and changed NOTHING;
+    after the window the same mouse drag works (moves 1->2); tap+click no-op
+  6 touchcancel: "none"->"", "grabbing"->"", preview gone, no drop, not wedged
+  7 MULTI-TOUCH: touches=[3,7]; preview stayed on finger 7 (0.0px off, 412px
+    from the intruder); lifting 3 dropped nothing; tile landed at finger 7's
+    target; decoy empty; exactly ONE move
+  8 MOUSE regression (desktop): rack->board, swap, board->board, board->rack,
+    Undo restores exactly, no page exceptions
+  9 8/8 ZERO-settle mouse drags landed on the correct cell
+```
+*`src/` untouched by the rig session — all ten harnesses re-run:* `verifyEngine`
+**53/0** + invariants (a)-(d) · `decoy` **23/0** · `redherring` **25/0** ·
+`composed` **32/0** · `cutpoint` **36/0** · `chain` **28/0** · `mixedGoalPlanner`
+**37/0** · `storage` **37/0** · `dragIdentity` **29/0** · `pairingMin` **31/0**,
+all par numbers EXACT. `npm run build` clean (107 modules).
 
 ---
 
@@ -703,6 +784,10 @@ src/lib/editorRules.ts    pure editor rules: usedIds / mintTile, TILE_COPIES cap
 src/lib/storage.ts        save/load + legacy id-less blob migration
 src/lib/generator.ts      routes generatePuzzle(diff) to archetype builder(s)
 ```
+**Browser checks — `npm run verify:mobile` (120 checks: mobile 42, wide 24,
+touch 54). Re-run after ANY change to Board/Rack/DragPreview/TileFace/useDrag/
+PlayScreen/App or index.css.** See "THE BROWSER VERIFICATION RIG".
+
 **Harnesses — run with `npx tsx <path>`. Re-run ALL of them after any
 `src/lib/` change; there is no test framework, these ARE the tests:**
 ```
