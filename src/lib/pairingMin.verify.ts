@@ -680,7 +680,14 @@ console.log('\n6. REGRESSION — the seven shipped par numbers (m=1 builds, noth
   let allExact = true
   for (const [label, build, want] of rows) {
     const seen = new Set<number | null>()
-    for (let i = 0; i < 20; i++) seen.add(build())
+    // A builder may legitimately reject a single draw (the runs-to-groups
+    // uniqueness gate rejects ~30% at easy), so retry as the generator does. A
+    // builder that can NEVER build still records null and still fails here.
+    for (let i = 0; i < 20; i++) {
+      let par = build()
+      for (let t = 0; par === null && t < 40; t++) par = build()
+      seen.add(par)
+    }
     const vals = [...seen]
     const exact = vals.length === 1 && vals[0] === want
     if (!exact) allExact = false

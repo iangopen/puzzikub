@@ -9,6 +9,7 @@ import { type Tile, type Grid, type Difficulty, makeTile } from '../types'
 import { solveBagM2 } from './solver'
 import { isValidRun, isValidGroup, validateGrid } from './validator'
 import { type WindowSpec, bindMinCostGoal } from './mixedGoalPlanner'
+import { partitionCount } from './difficultyProxy'
 
 /** The two directions of the same Latin-rectangle duality. */
 export type ArchetypeType = 'groups-to-runs' | 'runs-to-groups'
@@ -525,11 +526,22 @@ export function planColorRunGoal(grid: Grid, rack: Tile[]): GoalPlan | null {
   return bestCellOf ? materialize(ctx, best, bestCellOf) : null
 }
 
+/** Ordered selections of `k` items from `xs` (k-permutations). */
+function kPermutations<T>(xs: T[], k: number): T[][] {
+  if (k === 0) return [[]]
+  const out: T[][] = []
+  for (let i = 0; i < xs.length; i++) {
+    const rest = [...xs.slice(0, i), ...xs.slice(i + 1)]
+    for (const p of kPermutations(rest, k - 1)) out.push([xs[i], ...p])
+  }
+  return out
+}
+
 /**
  * Cheapest "one value's group per row" layout — the goal of `runs-to-groups`,
- * and the exact mirror of the above. A window is now a value-row needing 3 or 4
- * distinct colours, so the free parameters are which value owns which row, the
- * left-to-right colour order inside the groups, and where the block sits.
+ * and the exact mirror of planColorRunGoal. A window is a value-row needing 3
+ * or 4 distinct colours, so the free parameters are which value owns which row,
+ * the left-to-right colour order inside the groups, and where the block sits.
  *
  * Ranking each row's colours *within the colours that value actually has* keeps
  * every group contiguous automatically, so a 3-colour row never leaves a hole
@@ -538,8 +550,110 @@ export function planColorRunGoal(grid: Grid, rack: Tile[]): GoalPlan | null {
  * Returns null unless every value has 3 or 4 distinct colours — which is
  * invariant (e) for this shape, and is why `groups-to-runs` tiles (whose
  * boundary values carry only 1-2 colours) can never be scored here by accident.
+ *
+ * WHY THIS IS NOT AN L! SEARCH ANY MORE (generator-audit session). The cost is
+ *     boardTiles + rack − fixed − cycles
+ * and both `fixed` and `cycles` can only involve goal cells that currently HOLD
+ * a tile: a tile is fixed when it already sits on its goal cell, and a cycle is
+ * a closed walk through occupied goal cells. A value sent to a goal row with no
+ * board tile on it therefore contributes nothing, whichever empty row it gets.
+ * So only the values assigned to OCCUPIED goal rows matter — an ordered choice
+ * of k values for the k occupied rows inside the block, L!/(L−k)! candidates
+ * instead of L!. Builder boards occupy 3 rows, so L=7 drops from 5040 orders to
+ * 210 and L=8 from 40320 to 336. The result is the same minimum, not an
+ * approximation: valueGroupPlanner.verify.ts checks it against the exhaustive
+ * original (kept below) on builder boards and on scrambled ones.
  */
 export function planValueGroupGoal(grid: Grid, rack: Tile[]): GoalPlan | null {
+  const ctx = makeCostCtx(grid, rack)
+  if (!ctx) return null
+  const { rows, cols, board, all, goals } = ctx
+
+  const byValue = new Map<number, Tile['c'][]>()
+  for (const t of all) byValue.set(t.n, [...(byValue.get(t.n) ?? []), t.c])
+  for (const cs of byValue.values()) {
+    if (cs.length < 3 || cs.length > 4) return null
+    if (new Set(cs).size !== cs.length) return null
+  }
+
+  const values = [...byValue.keys()].sort((a, b) => a - b)
+  const vmin = values[0]
+  const vmax = values[values.length - 1]
+  const maxWidth = Math.max(...[...byValue.values()].map(cs => cs.length))
+  if (values.length > rows || maxWidth > cols) return null
+
+  const rowOccupied = grid.map(rw => rw.some(t => t !== null))
+  const colors = [...new Set(all.map(t => t.c))]
+  const n = board.length
+  const vOff = board.map(b => b.tile.n - vmin)
+  const rowIdx = new Int32Array(vmax - vmin + 1)
+  const boardRank = new Int32Array(n)
+  const base = new Int32Array(n)
+
+  // Value orders worth trying, per block position: one per ordered choice of
+  // values for the occupied rows, the rest filling the empty rows in ascending
+  // order (which empty row a value gets cannot change the cost).
+  const ordersFor = (rowStart: number): number[][] => {
+    const slots: number[] = []
+    for (let i = 0; i < values.length; i++) if (rowOccupied[rowStart + i]) slots.push(i)
+    return kPermutations(values, slots.length).map(chosen => {
+      const order = new Array<number>(values.length).fill(-1)
+      slots.forEach((slot, j) => { order[slot] = chosen[j] })
+      const rest = values.filter(v => !chosen.includes(v))
+      let r = 0
+      for (let i = 0; i < order.length; i++) if (order[i] === -1) order[i] = rest[r++]
+      return order
+    })
+  }
+  const orders: number[][][] = []
+  for (let rowStart = 0; rowStart + values.length <= rows; rowStart++) orders.push(ordersFor(rowStart))
+
+  let best = Infinity
+  let bestCellOf: ((t: Tile) => number) | null = null
+
+  for (const pi of permutations(colors)) {
+    const piIndex = new Map(pi.map((c, i) => [c, i]))
+    // `rank` maps a tile to its column inside its value's group. Keyed by minted
+    // copy-0 ids, which is safe here precisely because this planner rejects any
+    // value carrying a colour twice (the distinct-colour check above), so every
+    // tile it ever sees is the sole copy of its (value, colour).
+    const rank = new Map<string, number>()
+    for (const [v, cs] of byValue) {
+      const ordered = [...cs].sort((a, b) => piIndex.get(a)! - piIndex.get(b)!)
+      ordered.forEach((c, i) => rank.set(tileKey(makeTile(v, c)), i))
+    }
+    for (let i = 0; i < n; i++) boardRank[i] = rank.get(tileKey(board[i].tile))!
+
+    for (let rowStart = 0; rowStart + values.length <= rows; rowStart++) {
+      const rowShift = rowStart * cols
+      for (const vp of orders[rowStart]) {
+        for (let i = 0; i < vp.length; i++) rowIdx[vp[i] - vmin] = i
+        for (let i = 0; i < n; i++) base[i] = rowIdx[vOff[i]] * cols + boardRank[i]
+        for (let colStart = 0; colStart + maxWidth <= cols; colStart++) {
+          const shift = rowShift + colStart
+          for (let i = 0; i < n; i++) goals[i] = base[i] + shift
+          const cost = ctx.cost()
+          if (cost < best) {
+            best = cost
+            const rowOf = new Map(vp.map((v, i) => [v, rowStart + i]))
+            const rankSnap = new Map(rank)
+            const cs = colStart
+            bestCellOf = (t: Tile) => rowOf.get(t.n)! * cols + cs + rankSnap.get(tileKey(t))!
+          }
+        }
+      }
+    }
+  }
+
+  return bestCellOf ? materialize(ctx, best, bestCellOf) : null
+}
+
+/**
+ * The ORIGINAL exhaustive planner: every one of the L! value orders. Kept, like
+ * solveBag, purely as an independent differential oracle for
+ * planValueGroupGoal (see valueGroupPlanner.verify.ts). No builder calls it.
+ */
+export function planValueGroupGoalExhaustive(grid: Grid, rack: Tile[]): GoalPlan | null {
   const ctx = makeCostCtx(grid, rack)
   if (!ctx) return null
   const { rows, cols, board, all, goals } = ctx
@@ -780,7 +894,12 @@ function runsToGroupsParamsFor(diff: Difficulty): Params {
     case 'easy': return { L: 5, rackSize: 2 }   // par 11  (target avg 10.6, range 10-11)
     case 'medium': return { L: 6, rackSize: 4 } // par 16  (target avg 13.4, range 12-15)
     case 'hard': return { L: 7, rackSize: 5 }   // par 20  (target avg 20.0, range 18-21)
-    case 'extreme': return { L: 7, rackSize: 5 } // par 20  (reverted from L=8/par24: ~5s/build wasn't worth it, see CLAUDE.md)
+    // DELIBERATE RECALIBRATION (generator-audit session): extreme was identical
+    // to hard (L=7 / par 20) only because the old L! planner made L=8 cost ~5s.
+    // With the occupied-row planner L=8 builds in ~0.1s, so extreme is its own
+    // tier again. rackSize 5 (par 23), not 6 (par 24): six offsets out of eight
+    // admit a single no-three-consecutive pattern, i.e. one board shape.
+    case 'extreme': return { L: 8, rackSize: 5 } // par 23  (groups-to-runs extreme: 24-25 typical)
   }
 }
 
@@ -829,6 +948,14 @@ export function buildRunsToGroupsAt(L: number, rackSize: number): ArchetypeResul
   const boardTiles = grid.flat().filter((t): t is Tile => t !== null)
   const allTiles = [...boardTiles, ...rack]
   if (!solveBagM2(allTiles).solvable) return null
+
+  // UNIQUENESS GATE (generator-audit session). When three consecutive values
+  // carry no rack tile, those nine board tiles can simply stay as three short
+  // runs: a second, much cheaper solution that never dismantles the board, so
+  // par overstates it and the intended insight is optional. Measured at 29% of
+  // easy builds (rack {s,s+1}, {s+3,s+4} or {s,s+4} at L=5); 0% at medium and
+  // above. Gated on the real partition count rather than on that pattern.
+  if (partitionCount(allTiles, 2) !== 1) return null
 
   // (d) the obvious move must fail — exhaustively, not heuristically.
   const search = existsNoRelocationWin(grid, rack)
