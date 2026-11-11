@@ -134,6 +134,12 @@ export function SettingsPanel({
                   <option key={b} value={b}>{BACKGROUND_LABELS[b]}</option>
                 ))}
               </select>
+              {/* Attribution for the animated background (see DarkVeil.tsx header). */}
+              <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>
+                Animated veil: DarkVeil by{' '}
+                <a href="https://reactbits.dev/backgrounds/dark-veil" target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'inherit' }}>React Bits</a>
+              </div>
             </div>
 
             {/* Tile style select */}

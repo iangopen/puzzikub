@@ -1,4 +1,33 @@
-// @ts-nocheck
+/*
+ * DarkVeil — animated WebGL background.
+ *
+ * Source: React Bits by David Haz — https://reactbits.dev/backgrounds/dark-veil
+ *         (repository: https://github.com/DavidHDev/react-bits)
+ * Used here as part of this application under the React Bits license
+ * ("MIT + Commons Clause License Condition v1.0"), whose required notice follows:
+ *
+ *   Copyright (c) 2026 David Haz
+ *
+ *   Permission is hereby granted, free of charge, to any person obtaining a copy
+ *   of this software and associated documentation files (the "Software"), to deal
+ *   in the Software without restriction, including without limitation the rights
+ *   to use, copy, modify, merge, publish, and distribute the Software as part of
+ *   an application, website, or product, subject to the following conditions:
+ *
+ *   The above copyright notice and this permission notice shall be included in
+ *   all copies or substantial portions of the Software.
+ *
+ *   Commons Clause Restriction: You may use this Software, including for any
+ *   commercial purpose, so long as you do not sell, sublicense, or redistribute
+ *   the components themselves - whether alone, in a bundle, or as a ported version.
+ *
+ *   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. Full text:
+ *   https://github.com/DavidHDev/react-bits/blob/main/LICENSE.md
+ *
+ * Local changes: TypeScript typing of the canvas ref and a null guard only;
+ * the shader and rendering are unchanged. Renders with the `ogl` WebGL library
+ * (Unlicense / public domain).
+ */
 import { useRef, useEffect } from 'react'
 import { Renderer, Program, Mesh, Triangle, Vec2 } from 'ogl'
 import './DarkVeil.css'
@@ -84,11 +113,12 @@ export default function DarkVeil({
   warpAmount = 0,
   resolutionScale = 1,
 }) {
-  const ref = useRef(null)
+  const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     const canvas = ref.current
-    const parent = canvas.parentElement
+    const parent = canvas?.parentElement
+    if (!canvas || !parent) return
 
     const renderer = new Renderer({
       dpr: Math.min(window.devicePixelRatio, 2),
