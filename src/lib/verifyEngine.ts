@@ -471,13 +471,14 @@ function simulatePlan(startGrid: Grid, startRack: Tile[], plan: GoalPlan | null)
 // exercised at every difficulty regardless of the 50/50 coin flip.
 for (const arch of ARCHETYPES) {
   for (const diff of difficulties) {
-    let simmed = 0, exact = 0, wonAll = 0
+    let simmed = 0, exact = 0, wonAll = 0, calls = 0, rejected = 0
     const lines: string[] = []
     for (let i = 0; i < 5; i++) {
       // A builder may legitimately reject a draw (e.g. the runs-to-groups
       // uniqueness gate rejects ~30% at easy), so retry as generateArchetype does.
       let result = arch.build(diff)
-      for (let t = 0; !result && t < 40; t++) result = arch.build(diff)
+      calls++
+      for (let t = 0; !result && t < 40; t++) { rejected++; calls++; result = arch.build(diff) }
       if (!result) { lines.push(`  #${i + 1} builder returned null`); continue }
       const sim = simulatePlan(result.grid, result.rack, arch.plan(result.grid, result.rack))
       if (!sim) { lines.push(`  #${i + 1} no plan`); continue }
@@ -489,6 +490,7 @@ for (const arch of ARCHETYPES) {
     }
     console.log(`${arch.id} / ${diff}:`)
     for (const l of lines) console.log(l)
+    console.log(`  builder rejection rate: ${rejected}/${calls} calls (${(100 * rejected / calls).toFixed(0)}%)`)
     check(`${arch.id}/${diff}: simulated move count equals par on all 5`, simmed === 5 && exact === 5)
     check(`${arch.id}/${diff}: simulated sequence ends in a validateGrid win on all 5`, simmed === 5 && wonAll === 5)
     console.log('')

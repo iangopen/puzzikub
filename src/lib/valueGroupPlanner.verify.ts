@@ -49,6 +49,30 @@ for (const [L, rack, n] of [[3, 1, 40], [4, 2, 40], [5, 2, 40], [6, 4, 30], [7, 
   check(`L=${L} par is 3L+rack-6`, formula === built)
 }
 
+console.log('\n=== 1b. the SHIPPED large sizes: L=7 (hard) and L=8 (extreme), 30 builder boards each ===')
+// Extreme ships at L=8, so equivalence matters most exactly here. The exhaustive
+// planner costs ~1 s (L=7) and ~10 s (L=8) per board, which is why this section
+// dominates the harness's run time (several minutes).
+let bigCompared = 0, bigMismatch = 0
+for (const [L, rack] of [[7, 5], [8, 5]] as const) {
+  let built = 0, same = 0, calls = 0
+  while (built < 30 && calls < 400) {
+    calls++
+    const b = buildRunsToGroupsAt(L, rack)
+    if (!b) continue
+    built++
+    const ex = planValueGroupGoalExhaustive(b.grid, b.rack)
+    if (ex && ex.moves === b.minMoves) same++
+    else console.log(`  MISMATCH L=${L}: new=${b.minMoves} exhaustive=${ex?.moves}`)
+  }
+  bigCompared += built
+  bigMismatch += built - same
+  console.log(`  L=${L} rack=${rack}: ${built} boards compared, ${same} equal, ${built - same} mismatches; ` +
+    `builder rejection rate ${calls - built}/${calls} calls (${(100 * (calls - built) / calls).toFixed(0)}%)`)
+  check(`L=${L}: 30 builder boards agree with exhaustive`, built === 30 && same === 30)
+}
+console.log(`  large-size total: ${bigCompared} boards, ${bigMismatch} mismatches`)
+
 console.log('\n=== 2. scrambled boards: new planner == exhaustive planner ===')
 // Tiles of an N-colour x L-value block (some values 3 colours, some 4), split
 // at random between board and rack, board tiles on random cells.
@@ -102,9 +126,11 @@ for (const diff of ['easy', 'medium', 'hard', 'extreme'] as const) {
   let ok = 0
   const pars = new Set<number>()
   // The builder may legitimately return null (uniqueness gate), so retry.
+  let calls = 0, rejected = 0
   for (let built = 0, tries = 0; built < 10 && tries < 400; tries++) {
     const b = buildRunsToGroups(diff)
-    if (!b) continue
+    calls++
+    if (!b) { rejected++; continue }
     built++
     const plan = planValueGroupGoal(b.grid, b.rack)!
     const res = mixedLayoutMoves(b.grid, b.rack, plan.goal)
@@ -112,6 +138,7 @@ for (const diff of ['easy', 'medium', 'hard', 'extreme'] as const) {
     pars.add(b.minMoves)
   }
   console.log(`  ${diff}: 10 builds, ${ok} replay to a validateGrid win in par; par = ${[...pars].join(',')}`)
+  console.log(`    builder rejection rate: ${rejected}/${calls} calls (${(100 * rejected / calls).toFixed(0)}%)`)
   check(`${diff}: all plans replay exactly`, ok === 10)
   check(`${diff}: par is exactly ${PAR[diff]}`, pars.size === 1 && pars.has(PAR[diff]))
 }

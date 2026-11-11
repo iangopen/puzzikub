@@ -12,3 +12,15 @@
 - Three harness loops (`valueGroupPlanner`, `verifyEngine`, `pairingMin`) treated
   a `null` build as a failure; each was changed to retry, as the generator does.
 - Not merged, not deployed. Open leads ranked in `GENERATOR_AUDIT.md` §5.
+
+## 2026-11-11 — trap variety (branch `trap-variety`, off `generator-audit`)
+- Probed every candidate variant at the bag level first; shipped only those
+  measured unique with dead traps (`GENERATOR_AUDIT.md` §7.2 lists the walls).
+- Generalised decoy / red herring / composed into one core each, with named
+  proof steps; added mirror + row-order variants to chain.
+- Extreme red herring moved to L=7/8 with a middle filler (L2); hard band cut.
+- New harness `trapVariants.verify.ts` (118). The new uniqueness step also
+  rejected the unshipped `buildComposedAt(8)` with no filler (5 solutions).
+- Added 30 exhaustive comparisons each at L=7 and L=8 for the group planner,
+  and rejection-rate reporting to the retrying harnesses and the audit.
+- Not merged, not deployed.

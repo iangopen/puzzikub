@@ -683,11 +683,14 @@ console.log('\n6. REGRESSION — the seven shipped par numbers (m=1 builds, noth
     // A builder may legitimately reject a single draw (the runs-to-groups
     // uniqueness gate rejects ~30% at easy), so retry as the generator does. A
     // builder that can NEVER build still records null and still fails here.
+    let calls = 0, rejected = 0
     for (let i = 0; i < 20; i++) {
       let par = build()
-      for (let t = 0; par === null && t < 40; t++) par = build()
+      calls++
+      for (let t = 0; par === null && t < 40; t++) { rejected++; calls++; par = build() }
       seen.add(par)
     }
+    console.log(`          builder rejection rate: ${rejected}/${calls} calls (${(100 * rejected / calls).toFixed(0)}%)`)
     const vals = [...seen]
     const exact = vals.length === 1 && vals[0] === want
     if (!exact) allExact = false

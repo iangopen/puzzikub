@@ -5,10 +5,10 @@
  * `generatePuzzle` path and prints par distribution, shape variety, generation
  * time, solution counts and the non-par difficulty proxies from
  * difficultyProxy.ts. Output is Markdown tables on stdout. `filter` is a
- * substring of the row label (e.g. "hard" or "decoy").
+ * comma-separated list of row-label substrings (e.g. "decoy,SHIPPED MIX / hard").
  */
 import type { Difficulty, Puzzle, Tile } from '../types'
-import { generatePuzzle, FORCE_TYPES, type ForceType } from './generator'
+import { generatePuzzle, generationStats, FORCE_TYPES, type ForceType } from './generator'
 import { validateGrid } from './validator'
 import { solveBagM2 } from './solver'
 import { formsValidSetAlone, existsNoRelocationWin } from './archetypes'
@@ -65,7 +65,9 @@ let invariantFailures = 0
 let oracleDisagreements = 0
 
 function audit(label: string, diff: Difficulty, force?: ForceType): void {
-  if (FILTER && !label.includes(FILTER)) return
+  if (FILTER && !FILTER.split(',').some(f => label.includes(f))) return
+  generationStats.attempts = 0
+  generationStats.rejected = 0
   const puzzles: Puzzle[] = []
   const times: number[] = []
   for (let i = 0; i < N; i++) {
@@ -136,6 +138,7 @@ function audit(label: string, diff: Difficulty, force?: ForceType): void {
       grid: colSet.size === 1 ? `${g.length}x${g[0].length}` : `cols ${[...colSet].sort((a, b) => a - b).join('/')}`,
       exact: String(new Set(puzzles.map(exactSig)).size),
       struct: String(new Set(puzzles.map(structSig)).size),
+      rej: `${(100 * generationStats.rejected / Math.max(1, generationStats.attempts)).toFixed(0)}% (${generationStats.rejected}/${generationStats.attempts})`,
       ms: `${f1(mean(times))} / ${f1(pct(times, 0.95))} / ${f1(Math.max(...times))}`,
     },
   })
@@ -171,7 +174,7 @@ for (const diff of DIFFS) audit(`SHIPPED MIX / ${diff}`, diff)
 console.log(`\nN = ${N} puzzles per row, generated through generatePuzzle().`)
 print('A. Par, size, variety, generation time', [
   ['n', 'n'], ['par', 'par (value:count)'], ['tiles', 'tiles'], ['grid', 'grid rows x cols'],
-  ['exact', 'distinct exact'], ['struct', 'distinct structural'], ['ms', 'gen ms mean / p95 / max'],
+  ['exact', 'distinct exact'], ['struct', 'distinct structural'], ['rej', 'builder rejections'], ['ms', 'gen ms mean / p95 / max'],
 ], tableA)
 print('B. Non-par difficulty proxies', [
   ['sols', 'solutions median (min-max)'], ['unique', 'unique'], ['plausible', 'plausible sets'],

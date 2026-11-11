@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — main merged and deployed; branch `generator-audit` pushed, unmerged (see Current status).*
+*Last updated: 2026-11-11 — main merged and deployed; branches `generator-audit` and `trap-variety` pushed, unmerged (see Current status).*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -196,14 +196,17 @@ says "par", never "optimal".
 |---|---|---|---|
 | `groups-to-runs` | all | 11/16/20/~24 | board = value groups, goal = colour runs |
 | `runs-to-groups` | all | 11/16/20/23 | the mirror |
-| `runs-to-groups-decoy` | hard, extreme | 22 / 25 | ONE tempting run-extension that dead-ends |
-| `runs-to-groups-redherring` | hard, extreme | 21 / 24 | TWO tempting extenders, only one correct |
-| `runs-to-groups-composed` | hard, extreme | 24 / 27 | decoy + red herring on one board, coupled |
+| `runs-to-groups-decoy` | hard, extreme | 22 / 25 (variants 19-23 / 22-27) | ONE tempting run-extension that dead-ends |
+| `runs-to-groups-redherring` | hard, extreme | 21 / 24 (shipped: 20-24 / 27-32) | TWO tempting extenders, both dead ends |
+| `runs-to-groups-composed` | hard, extreme | 24 / 27 (extreme also 31) | decoy + red herring on one board, coupled |
 | `cut-point` | **medium only** | **12** | **duplicates force valid runs to be CUT APART** |
 | `chain` | **medium only** | **9** | **a DEDUCTIVE chain: 8 forced deductions in sequence** |
 
 `archetypeId` is internal only — nothing player-facing names the mechanic.
 Dev-only `?forceArchetype=` accepts all of them (each still tier-restricted).
+*The first par in each trap row is the ORIGINAL puzzle, still pinned by its own
+harness; the bracket is what the `trap-variety` branch ships. See "Branch
+`trap-variety`" under Current status.*
 
 **The cut-point archetype is the payoff of this whole migration** — the first
 construction that genuinely requires duplicate tiles. Board = one already-valid
@@ -809,7 +812,12 @@ src/lib/pairingMin.verify.ts        31   (~9 min — BFS-bound, run it in
                                           the background and keep working)
 src/lib/storage.verify.ts           37
 src/lib/dragIdentity.verify.ts      29
-src/lib/valueGroupPlanner.verify.ts 27   (planValueGroupGoal vs its exhaustive
+src/lib/trapVariants.verify.ts     118   (every shipped trap/chain VARIANT: proof,
+                                          invariants, replay, pinned par, and
+                                          four broken variants that must fail)
+src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
+                                          run it in the background.
+                                          planValueGroupGoal vs its exhaustive
                                           original; pins runs-to-groups par
                                           11/16/20/23)
 ```
@@ -817,6 +825,50 @@ src/lib/valueGroupPlanner.verify.ts 27   (planValueGroupGoal vs its exhaustive
 ---
 
 ## Current status (update this after each session)
+### Branch `trap-variety` (2026-11-11, off `generator-audit`) — pushed, NOT merged, NOT deployed
+Variety and difficulty changes: play this branch before merging. Numbers and
+method are in **`GENERATOR_AUDIT.md` §7**.
+
+**Real and verified on that branch:**
+- **One core per trap layer, taking a variant.** `buildDecoyAt(L, variant?)`,
+  `buildRedHerringAt`, `buildComposedAt`; with no variant each builds the
+  ORIGINAL puzzle, so the old harnesses and pars (22/25, 21/24, 24/27) are
+  untouched. `buildXVariant(diff)` draws a random shipped variant and is what
+  `generator.ts` calls. `proveXAt(L, variant)` returns the named proof steps.
+- **Every build proves itself**: invariants (a)-(d), each tempting tile visibly
+  extends a run, every tempting commitment AND every combination of them is a
+  dead end (`solveBagM2`), exactly one partition, goal reached with a witness.
+  ***The variant tables (`DECOY_FILLERS`, `HERRING_SHIPPED`, `COMPOSED_SHIPPED`)
+  only list what a probe measured as passing. Do not add an entry without
+  running `proveXAt` on it*** — arguments do not transfer between variants.
+- **Shapes per 200 puzzles** (up to value shift and colour relabel): decoy
+  3 → 30 / 46, red herring 3 → 18 / 35, composed 6 → 18 / 36, chain 6 → 192.
+  Chain has only 2 genuinely different ladders (ascending, mirrored); the rest
+  is board-row order.
+- **Red herring at extreme ships only L=7/8 with a middle filler**: technique
+  level L2 on 200/200 (was L1). **Deliberate par recalibration: extreme red
+  herring 24 → 27-32.** At hard it cannot be lifted above L1 (no filler fits at
+  L≤6), so its band went 0.14 → 0.08.
+- New variant pars are pinned in `trapVariants.verify.ts` (decoy 19-23 / 22-27,
+  composed extreme 27 or 31, chain 9 in both directions).
+- **Rows are never staggered** — Ian had a staggered layout removed. Every row
+  starts at column 1; the harness asserts it.
+- `planValueGroupGoal` is now compared against the exhaustive planner on 30
+  boards each at L=7 and L=8 (0 mismatches).
+- Retrying harnesses print their builder rejection rate; the audit has a
+  "builder rejections" column (`generationStats` in `generator.ts`).
+- Force types added: `decoy-classic|mirror`, `red-herring-classic|split`,
+  `composed-classic|mirror|third`, `chain-classic|mirror`.
+- Harnesses: twelve, 478 checks, 0 failures; `npm run build` clean;
+  `verify:mobile` 120/0; shipped p95 23 ms (hard) / 42 ms (extreme).
+
+**Still open:** red herring hard and composed hard stop at 18 shapes (reaching
+25 means admitting L=7 into hard — one line, not done because it is bigger than
+anything else in the tier); no L2 red herring small enough for hard; and the
+rest of `GENERATOR_AUDIT.md` §5 (a deduction-chain-plus-trap layer, groups-to-
+runs having 2/16/81 solutions, medium calibration). Nothing here has been
+played by a person.
+
 ### Branch `generator-audit` (2026-11-11) — pushed, NOT merged, NOT deployed
 Difficulty changes are a feel judgement: play this branch before merging it.
 Full numbers, method and the ranked open leads are in **`GENERATOR_AUDIT.md`**.

@@ -14,8 +14,8 @@ filters rows (`... 200 decoy`). The proxies live in `src/lib/difficultyProxy.ts`
 | 1 | Generation was over the 1 s budget: hard p95 1197 ms, extreme p95 1128 ms, caused by one archetype (runs-to-groups, 1.3-1.5 s per build) | **fixed**: p95 54 ms / 79 ms |
 | 2 | 29% of easy runs-to-groups puzzles had a second, cheaper solution that never dismantles the board | **fixed**: 100% unique |
 | 3 | Extreme runs-to-groups was the same puzzle as hard (L=7, par 20) | **fixed**: L=8, par 23 (deliberate recalibration) |
-| 4 | Trap layers have 3 structural shapes each (6 for composed, 6 for chain) | open, ranked below |
-| 5 | Red herring needs a weaker technique than plain easy runs-to-groups | open |
+| 4 | Trap layers have 3 structural shapes each (6 for composed, 6 for chain) | **done on `trap-variety`**: 18-48 per tier, see §7 |
+| 5 | Red herring needs a weaker technique than plain easy runs-to-groups | **extreme done** (L2), hard band cut, see §7.3 |
 | 6 | groups-to-runs has 2 / 16 / 81 solutions at medium / hard / extreme | open |
 | 7 | Medium mixes technique levels 0-3 and par 9-16 | open |
 
@@ -341,7 +341,11 @@ is what the gate enforces.
 
 Each is a lead with the measurement behind it, not a conclusion.
 
-1. **Trap-layer variety (gain: high for variety, risk: low to medium).**
+1. **Trap-layer variety — DONE on `trap-variety`, see §7.** Mirror, filler sets
+   and colour assignment shipped; staggered rows deliberately not used. What
+   remains: red herring hard and composed hard stop at 18 shapes (§7.2).
+   Original write-up follows.
+   *(gain: high for variety, risk: low to medium.)*
    Decoy, red herring and composed each produce 3-6 structural shapes. Three
    cheap sources of variety, in order of safety:
    - *Mirror the decoy.* The rules are symmetric under value reflection, so a
@@ -365,7 +369,11 @@ Each is a lead with the measurement behind it, not a conclusion.
    Target on this audit: ladder shows both L0 steps ≥4 and L2 steps ≥1, with
    tempting-dead ≥1.
 
-3. **Red herring is technique-light (gain: medium, risk: low to try).** L1 only
+3. **Red herring is technique-light — extreme DONE, hard MITIGATED, see §7.3.**
+   Extreme now ships only L2 variants; hard cannot be lifted above L1 at its
+   sizes, so its band went from 0.14 to 0.08. What remains: an L2 red herring
+   small enough for hard. Original write-up follows.
+   *(gain: medium, risk: low to try.)* L1 only
    (stranding), 4-5 singles, on 21-24 tiles. It ships at 14% of hard and 22% of
    extreme. Either lower its extreme band in favour of composed (L2, three
    tempting tiles), or look for a variant with fillers that pushes it to L2.
@@ -404,7 +412,10 @@ Each is a lead with the measurement behind it, not a conclusion.
 8. **Coupled blocks (gain: unknown, risk: high).** Still blocked on the
    contested-resource redesign in `COUPLED_DESIGN.md`. Nothing here changes that.
 
-9. **Board layout legibility (gain: unknown, unmeasured).** Runs-to-groups
+9. **Board layout legibility — staggering RULED OUT by Ian** (he had a staggered
+   layout removed and prefers aligned rows). The observation stands; any fix has
+   to keep every row starting at the same column.
+   *(gain: unknown, unmeasured.)* Runs-to-groups
    boards are three aligned rows, so each column already reads top to bottom as
    the group it will become. No proxy here sees layout. Worth a playtest
    question before any work.
@@ -417,3 +428,215 @@ Each is a lead with the measurement behind it, not a conclusion.
 - Timings are one Windows laptop, single runs, with tsx; relative changes are
   large enough (20-30x) not to depend on that, absolute values will differ.
 - Nothing here was played by a person.
+
+## 7. Trap variety session (branch `trap-variety`, 2026-11-11)
+
+Not merged, not deployed. Addresses §5 items 1 and 3; item 9 (staggered rows) was
+ruled out by Ian, so every row still starts at column 1 with a one-cell margin.
+Evidence: `npx tsx src/lib/trapVariants.verify.ts` (118 checks) and
+`npx tsx src/lib/generatorAudit.ts 200 "decoy / ,red-herring / ,composed / ,chain / ,SHIPPED MIX / hard,SHIPPED MIX / extreme"`.
+
+### 7.1 Before and after (200 puzzles per row)
+
+| row | distinct shapes | par | hardest technique | builder rejections | gen p95 |
+|---|---|---|---|---|---|
+| decoy / hard | 3 → **30** | 22 → 19-23 | L2 200 → L2 200 | 0% → 0% | 1.4 → 1.6 ms |
+| decoy / extreme | 3 → **46** (48 exist) | 25 → 22-27 | L2 200 → L2 200 | 0% → 0% | 0.4 → 2.1 ms |
+| red-herring / hard | 3 → **18** | 21 → 20-24 | L1 200 → L1 200 | 0% → 0% | 7.0 → 2.8 ms |
+| red-herring / extreme | 3 → **35** (36 exist) | 24 → 27-32 | L1 200 → **L2 200** | 0% → 0% | 10.2 → 20.0 ms |
+| composed / hard | 6 → **18** | 24 → 24 | L2 200 → L2 200 | 0% → 0% | 16.1 → 3.6 ms |
+| composed / extreme | 6 → **36** | 27 → 27 or 31 | L2 200 → L2 200 | 0% → 0% | 18.5 → 10.4 ms |
+| chain / medium | 6 → **192** | 9 → 9 | L0 200 → L0 200 | 0% → 0% | 3.0 → 1.4 ms |
+| SHIPPED MIX / hard | 70 → 109 | 17-24 → 17-24 | L1 29, L2 98, L3 73 → L1 16, L2 101, L3 83 | 0% → 0% | 44.2 → 22.5 ms |
+| SHIPPED MIX / extreme | 46 → 119 | 22-27 → 21-32 | L1 54, L2 114, L3 32 → **L1 0**, L2 169, L3 31 | 0% → 0% | 80.2 → 41.7 ms |
+
+Technique-ladder step counts (L0 / L1 / L2 / L3), before → after: red herring
+extreme 5.0 / 3.0 / 0 / 0 → 3.0 / 4.8 / 2.0 / 0; decoy hard 3.0 / 2.0 / 2.0 / 0 →
+2.2 / 3.0 / 1.8 / 0; composed extreme 4.0 / 3.0 / 2.0 / 0 → 4.0 / 3.5 / 2.0 / 0.
+All 1,800 audited puzzles passed invariants (a)-(d).
+
+What these columns do and do not say. "Distinct shapes" counts boards up to a
+value shift and a colour relabelling, so it measures how often a returning player
+meets a board they have not seen, not how different the boards feel. The
+technique level is a property of the bag: it says extreme red herring can no
+longer be finished with stranding alone, not that a person finds it harder. Par
+rose on extreme red herring because the boards are bigger (28-32 tiles against
+24), which is a size change as much as a reasoning one.
+
+### 7.2 What varies now, and what the probe ruled out
+
+Each layer has one core that takes a variant; the original puzzle is the default
+variant, so the old harnesses and their pinned pars still run the same code.
+Every build runs named proof steps against the real solver and is rejected at the
+first that fails: invariants (a)-(d), each tempting tile visibly extends a run,
+every tempting commitment and every combination of them leaves an unsolvable
+remainder, exactly one partition, and the goal is reached with a par witness.
+
+| layer | degrees of freedom | shapes | walls found by the probe |
+|---|---|---|---|
+| decoy | mirror (decoy below the block) × filler set × trap row | hard 2×5×3 = 30, extreme 2×8×3 = 48 | L=6 fillers {0} leaks (leftover 1,2,3 stays a run). L=7 {1} and {3}: trap dead but 10 and 5 solutions. |
+| red herring | split (the two extenders on different colours) × size × filler set × rows | hard (3+6)×2 = 18, extreme (3+6)×4 = 36 | L≤6 admits no filler: any middle tile of the fourth colour makes three in a row with the supports. L≥7 with no filler leaks (7 and 14 solutions). L=7 admits only {3}; L=8 admits {3}, {4}, {3,4}. |
+| composed | mirror × which colour carries the opposite-end extender (herring colour, or the third colour) × size × rows | hard 2×(6+3) = 18, extreme 2×(6+3)×2 = 36 | L=6 and L=7 are unique only with no filler (L=7 {3}: 2 solutions). L=8 is unique only with filler {3} (none: 5-7 solutions and a leak; {4}: 2). |
+| chain | mirror (descending ladder) × order of the five board rows | 2×120 = 240 possible, 192 seen in 200 | none |
+
+**Ceilings below the target of 25.** Red herring hard and composed hard stop at
+18. Both are structural at the sizes hard uses: with no filler possible, the only
+freedom is which rows carry the tempting tiles (9 arrangements), times two sizes
+for red herring and times the mirror for composed. Reaching 25 at hard means
+admitting the next size up (red herring L=7, par 27-28; composed L=7, par 27),
+which is a one-line change to `HERRING_SHIPPED.hard` / `COMPOSED_SHIPPED.hard`.
+It was not made because those are larger than anything else in the tier.
+
+**Chain: be clear about what 192 means.** Only the mirror changes the tiles; the
+ladder's structure is fixed by the 13-value range (links=4 is the only depth that
+fits), so there are 2 genuinely different chains. The other 190 are the same two
+chains with the board rows in a different order, which hides where the ladder
+starts but does not change the deduction.
+
+### 7.3 Red herring: strengthened at extreme, band cut at hard
+
+The request was for a wrong commitment whose failure only shows after a further
+forced step, so that the layer needs more than L1.
+
+- **Extreme: done.** Extreme now ships only L=7 and L=8 with a middle filler. The
+  filler forces a group in the middle, which is the extra step: "extend both
+  ends" no longer strands anything at once, it fails only after that group is
+  placed. Technique level L2 on 200 of 200 (was L1 on 200 of 200). Refutation
+  depth of the tempting commitments (`refutationDepth`, 1 = a tile is stranded at
+  once, 2 = only after following forced singles): one colour, low 1 / high 1 /
+  both 2; split, low 2 / high 2 / both 1. So in the split variants each single
+  wrong extension fails only after a forced step, and in the one-colour variants
+  the extend-both commitment does.
+- **Hard: not possible soundly, so the band was cut from 0.14 to 0.08.** At L=5
+  and L=6 there is no filler to add, and the layer stays L1 whatever the colour
+  arrangement. Split variants were still added at hard, since their single wrong
+  extensions have depth 2 where the original's have depth 1. The freed 0.06 goes
+  to the base archetypes.
+- This is a deliberate par recalibration: **extreme red herring par is 27-32**
+  (was 24). Hard is 20-24 (was 21): L=5 at 20-21 and L=6 at 23-24.
+
+### 7.4 Par for the new variants
+
+Par comes from `bindMinCostGoal` on each variant's deterministic goal, and the
+witness is replayed through a transcription of the DROP reducer in the harness
+(6 builds per variant, 300 replays, all landing on a `validateGrid` win in exactly
+par). The originals are unchanged: decoy 22/25, red herring 21 (L=5) and 24 (L=6),
+composed 24/27, chain 9. New values, all pinned in `trapVariants.verify.ts`:
+
+| variant | par |
+|---|---|
+| decoy hard, extra filler | 23 |
+| decoy hard, mirrored | 19-22 |
+| decoy extreme, alternative fillers | 26-27 |
+| decoy extreme, mirrored | 22-26 |
+| red herring split, L=5 / L=6 | 20-21 / 23-24 |
+| red herring L=7 {3} | 27-28 |
+| red herring L=8 | 30-32 |
+| composed mirrored or third-colour, L=6 / L=7 | 24 / 27 |
+| composed L=8 {3} (all four kinds) | 31 |
+| chain mirrored, any row order | 9 |
+
+Where a range is shown, par depends on which board row carries the trap colour:
+the goal layout is fixed, so a different row leaves a different number of tiles
+already in place. Mirrored decoys come out 1-3 moves under the original for that
+reason. As everywhere in this engine, par is exact for the goal the builder aims
+at and an upper bound over all layouts.
+
+### 7.5 The proof can fail
+
+Four deliberately broken variants, each rejected at the step named:
+
+```
+decoy L=6 fillers [0]  (leftover 1,2,3 is a run: the trap leaks)
+    ok   (a) board valid at move zero
+    ok   (c) rack is not a set on its own
+    ok   (b) bag solvable under solveBagM2
+    ok   (d) no no-relocation win (exhaustive)
+    ok   OBVIOUS the decoy visibly extends a board run
+    FAIL TRAP extending the run is a dead end
+decoy L=7 fillers [1]  (trap is dead, but 10 solutions)
+    ok   ... through TRAP extending the run is a dead end
+    FAIL UNIQUE exactly one partition
+red herring L=7, no filler  (extend-both leaves middle runs)
+    ok   ... through TRAP the high extension is a dead end
+    FAIL TRAP every combination of extensions is a dead end
+composed L=7 fillers [3]  (2 solutions)
+    ok   ... through TRAP every combination of extensions is a dead end
+    FAIL UNIQUE exactly one partition
+```
+
+The uniqueness step is new for all three layers. It also caught something
+pre-existing: `buildComposedAt(8)` with no filler, which `composed.verify.ts`
+used to assert as buildable, has 5 solutions. It was never shipped; the harness
+now builds L=8 with filler {3} and records the rejection.
+
+### 7.6 Sample boards
+
+```
+decoy, mirrored, hard (9 columns)            decoy, alternative fillers, extreme (10 columns)
+#1 par 21                                    #1 par 26
+   .  4b  5b  6b  7b  8b  9b                    .  3a  4a  5a  6a  7a  8a  9a
+   .  4a  5a  6a  7a  8a  9a                    .  3b  4b  5b  6b  7b  8b  9b
+   .  4r  5r  6r  7r  8r  9r                    .  3r  4r  5r  6r  7r  8r  9r
+   rack: 3r 4k 5k 7k                            rack: 5k 6k 8k 9k 10b
+#2 par 22                                    #2 par 27
+   .  2b  3b  4b  5b  6b  7b                    .  4a  5a  6a  7a  8a  9a 10a
+   .  2a  3a  4a  5a  6a  7a                    .  4b  5b  6b  7b  8b  9b 10b
+   .  2r  3r  4r  5r  6r  7r                    .  4r  5r  6r  7r  8r  9r 10r
+   rack: 1a 2k 3k 6k 7k                         rack: 4k 6k 7k 9k 10k 11r
+
+red herring, split, hard (8-9 columns)       red herring with filler, extreme (10-11 columns)
+#1 par 23                                    #1 par 27
+   .  2k  3k  4k  5k  6k  7k                    .  2k  3k  4k  5k  6k  7k  8k
+   .  2b  3b  4b  5b  6b  7b                    .  2a  3a  4a  5a  6a  7a  8a
+   .  2r  3r  4r  5r  6r  7r                    .  2b  3b  4b  5b  6b  7b  8b
+   rack: 1k 2a 3a 6a 7a 8r                      rack: 1a 2r 3r 5r 7r 8r 9b
+#2 par 21                                    #2 par 31
+   .  4a  5a  6a  7a  8a                        .  4a  5a  6a  7a  8a  9a 10a 11a
+   .  4k  5k  6k  7k  8k                        .  4b  5b  6b  7b  8b  9b 10b 11b
+   .  4r  5r  6r  7r  8r                        .  4k  5k  6k  7k  8k  9k 10k 11k
+   rack: 3a 4b 5b 7b 8b 9k                      rack: 3k 4r 5r 7r 10r 11r 12k
+
+composed, mirrored, hard (9 columns)         composed, third-colour extender, extreme (10-11 columns)
+#1 par 24                                    #1 par 27
+   .  7r  8r  9r 10r 11r 12r                    .  3b  4b  5b  6b  7b  8b  9b
+   .  7b  8b  9b 10b 11b 12b                    .  3r  4r  5r  6r  7r  8r  9r
+   .  7a  8a  9a 10a 11a 12a                    .  3k  4k  5k  6k  7k  8k  9k
+   rack: 6r 6b 9k 11k 12k 13r                   rack: 2k 2b 5a 8a 9a 10r
+#2 par 24                                    #2 par 31
+   .  2a  3a  4a  5a  6a  7a                    .  5b  6b  7b  8b  9b 10b 11b 12b
+   .  2k  3k  4k  5k  6k  7k                    .  5r  6r  7r  8r  9r 10r 11r 12r
+   .  2b  3b  4b  5b  6b  7b                    .  5k  6k  7k  8k  9k 10k 11k 12k
+   rack: 1k 1b 4r 6r 7r 8b                      rack: 4k 5a 6a 8a 10a 13b 13r
+
+chain, mirrored, rows shuffled, medium (6 columns)
+#1 par 9                                     #2 par 9
+   .  2r  2b  2a                                .  7b  8b  9b 10b
+   .  2k  3k  4k  5k                            .  1b  1a  1k
+   .  8b  9b 10b 11b                            .  1r  2r  3r  4r
+   . 11a 12a 13a                                .  4k  5k  6k  7k
+   .  5r  6r  7r  8r                            . 10a 11a 12a
+   rack: 5b 5a 8a 8k 11r 11k                    rack: 4b 4a 7r 7a 10r 10k
+```
+
+The harness prints five of each. The widest new board is 11 columns (red herring
+and composed at L=8), inside the 12-column phone limit.
+
+### 7.7 Playing a variant by name
+
+`?forceArchetype=` now also accepts `decoy-classic`, `decoy-mirror`,
+`red-herring-classic`, `red-herring-split`, `composed-classic`,
+`composed-mirror`, `composed-third`, `chain-classic` and `chain-mirror`. The
+plain layer names (`decoy`, `red-herring`, `composed`, `chain`) draw any shipped
+variant. Nothing player-facing names a variant.
+
+### 7.8 Other changes in this session
+
+- `valueGroupPlanner.verify.ts` compared only 6 boards at L=7 and none at L=8.
+  It now compares 30 of each against the exhaustive planner: 60 boards, 0
+  mismatches (600 boards in total across the harness).
+- A retrying harness cannot see a builder that starts rejecting most draws, so
+  each one now prints its rejection rate on its own line (`verifyEngine`,
+  `pairingMin`, `valueGroupPlanner`, `trapVariants`), and the audit has a
+  "builder rejections" column fed by `generationStats` in `generator.ts`.
+- `refutationDepth` was added to `difficultyProxy.ts`.
