@@ -69,14 +69,22 @@ interface Props {
   onShowTutorial: () => void
   /** Persisted board-scale preference; 1 = the original 46x58 rendering. */
   boardScale?: number
+  /**
+   * A puzzle chosen in the Library. When present it is loaded on mount INSTEAD
+   * of generating one, and takes precedence over ?forceArchetype (that dev
+   * override is for generated puzzles only). Absent = generate on mount.
+   */
+  savedPuzzle?: Puzzle | null
+  /** Called when this screen generates, so App drops the saved selection. */
+  onSavedPuzzleCleared?: () => void
 }
 
-export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, onShowTutorial, boardScale = 1 }: Props) {
+export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, onShowTutorial, boardScale = 1, savedPuzzle, onSavedPuzzleCleared }: Props) {
   const { grid, rack, moves, undos, won, invalidCells, drop, undo, reset, loadPuzzle } = usePlayState()
   const { drag, startDrag, startDragTouch, updatePos, endDrag } = useDrag()
   const tileStyle = useContext(TileStyleContext)
 
-  const [diff, setDiff] = useState<Difficulty>('easy')
+  const [diff, setDiff] = useState<Difficulty>(savedPuzzle?.diff ?? 'easy')
   const [currentPuzzle, setCurrentPuzzle] = useState<Puzzle | null>(null)
   const [hoverTarget, setHoverTarget] = useState<
     { to: 'grid'; row: number; col: number } | { to: 'rack' } | null
@@ -181,6 +189,7 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
   }, [])
 
   const generate = useCallback((d: Difficulty) => {
+    onSavedPuzzleCleared?.()
     setGenFailed(false)
     for (let i = 0; i < 5; i++) {
       const p = generatePuzzle(d, forceType)
@@ -194,10 +203,11 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
     }
     if (forceType) console.log(`[forceArchetype=${forceType}] no puzzle for diff=${d} (trap layers are hard/extreme only)`)
     setGenFailed(true)
-  }, [loadPuzzle, forceType])
+  }, [loadPuzzle, forceType, onSavedPuzzleCleared])
 
   useEffect(() => {
-    generate('easy')
+    if (savedPuzzle) { loadPuzzle(savedPuzzle); setCurrentPuzzle(savedPuzzle) }
+    else generate('easy')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDiff = (d: Difficulty) => { setDiff(d); generate(d) }
@@ -316,6 +326,10 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
   }, [rack.length, won]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loading = grid.length === 0
+  // Only generated puzzles carry a constructed par. Editor-built and seed
+  // puzzles store optimalMoves = rack.length, a mere lower bound — showing it
+  // as par (and calling a win "perfect!" against it) would be misleading.
+  const par = currentPuzzle?.generated ? currentPuzzle.optimalMoves : null
 
   return (
     <div style={{ background: 'var(--bg)', minHeight: '100vh', transition: 'background 0.15s ease' }}>
@@ -366,7 +380,7 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', fontSize: 12, color: 'var(--text-secondary)', margin: '4px 0 12px' }}>
-              moves: {moves}&nbsp;&nbsp;par: {currentPuzzle?.optimalMoves ?? '—'}&nbsp;&nbsp;rack: {rack.length}
+              moves: {moves}&nbsp;&nbsp;par: {par ?? '—'}&nbsp;&nbsp;rack: {rack.length}
             </div>
 
             {/*
@@ -403,12 +417,12 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
             {won && (
               <div style={{ color: '#27500A', fontSize: 13, margin: '12px 0' }}>
                 <span className="win-text-in">
-                  {currentPuzzle && moves === currentPuzzle.optimalMoves
+                  {par !== null && moves === par
                     ? `cleared ✓ perfect!  ${moves} moves`
-                    : currentPuzzle && moves <= currentPuzzle.optimalMoves * 1.5
-                    ? `cleared ✓  ${moves} moves  (par: ${currentPuzzle.optimalMoves})`
-                    : currentPuzzle
-                    ? `cleared ✓  ${moves} moves  (par: ${currentPuzzle.optimalMoves} — beat your own record?)`
+                    : par !== null && moves <= par * 1.5
+                    ? `cleared ✓  ${moves} moves  (par: ${par})`
+                    : par !== null
+                    ? `cleared ✓  ${moves} moves  (par: ${par} — beat your own record?)`
                     : `cleared ✓  ${moves} moves`}
                 </span>
               </div>

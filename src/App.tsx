@@ -61,6 +61,10 @@ function BackgroundLayer({ bg }: { bg: BackgroundStyle }) {
 function App() {
   const [screen, setScreen] = useState<Screen>('play')
   const [library, setLibrary] = useState<Puzzle[]>(loadLibrary)
+  // The saved puzzle the Library asked PlayScreen to load. Cleared on ANY nav
+  // (so the Play tab still means "a fresh puzzle") and when PlayScreen
+  // generates (New / difficulty pills), so it can never be silently reloaded.
+  const [savedPuzzle, setSavedPuzzle] = useState<Puzzle | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -120,8 +124,14 @@ function App() {
     saveLibrary(updated)
   }
 
-  function handlePlay(_puzzle: Puzzle) {
+  function handlePlay(puzzle: Puzzle) {
+    setSavedPuzzle(puzzle)
     setScreen('play')
+  }
+
+  function nav(s: Screen) {
+    setSavedPuzzle(null)
+    setScreen(s)
   }
 
   function handleSavePuzzle(puzzle: Puzzle) {
@@ -143,11 +153,13 @@ function App() {
           {screen === 'play' && (
             <PlayScreen
               activeScreen={screen}
-              onNav={setScreen}
+              onNav={nav}
               soundEnabled={soundEnabled}
               onShowSettings={() => setSettingsOpen(true)}
               onShowTutorial={() => setShowTutorial(true)}
               boardScale={boardScale}
+              savedPuzzle={savedPuzzle}
+              onSavedPuzzleCleared={() => setSavedPuzzle(null)}
             />
           )}
           {screen === 'library' && (
@@ -158,7 +170,7 @@ function App() {
               onSaveGenerated={p => updateLibrary([...library, p])}
               onDelete={id => updateLibrary(library.filter(p => p.id !== id))}
               activeScreen={screen}
-              onNav={setScreen}
+              onNav={nav}
               onShowSettings={() => setSettingsOpen(true)}
               onShowTutorial={() => setShowTutorial(true)}
             />
@@ -168,7 +180,7 @@ function App() {
               onSave={handleSavePuzzle}
               onBack={() => setScreen('library')}
               activeScreen={screen}
-              onNav={setScreen}
+              onNav={nav}
               onShowSettings={() => setSettingsOpen(true)}
               onShowTutorial={() => setShowTutorial(true)}
             />

@@ -53,6 +53,8 @@ export function Board({ grid, drag, hoveredCell, onTileMouseDown, onTileTouchSta
             // .closest('[data-cell],[data-rack]'); without this attribute the
             // hit-test lands on a div with nothing to identify it.
             data-cell={`${r},${c}`}
+            // Test hook: lets the browser rig compare on-screen tiles with stored ids.
+            data-tile-id={tile.id}
             // TOUCH GROUNDWORK — see the container comment below. An OCCUPIED
             // cell is reserved for dragging, so it opts out of native touch
             // panning entirely.

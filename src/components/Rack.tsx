@@ -63,6 +63,7 @@ export function Rack({ tiles, drag, onTileMouseDown, onTileTouchStart, onRackEnt
             // TILE_COPIES; legacy migration mints distinct copies), so this is a
             // valid sibling key even with both copies of a duplicate in the rack.
             key={tile.id}
+            data-tile-id={tile.id}
             // TOUCH GROUNDWORK — a rack tile is draggable, so like an occupied
             // board cell it opts out of native panning.
             style={{
