@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — mobile work merged to main and deployed under the iangopen account.*
+*Last updated: 2026-11-11 — main merged and deployed; branch `generator-audit` pushed, unmerged (see Current status).*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -195,7 +195,7 @@ says "par", never "optimal".
 | archetype | tiers | par | mechanic |
 |---|---|---|---|
 | `groups-to-runs` | all | 11/16/20/~24 | board = value groups, goal = colour runs |
-| `runs-to-groups` | all | 11/16/20/20 | the mirror |
+| `runs-to-groups` | all | 11/16/20/23 | the mirror |
 | `runs-to-groups-decoy` | hard, extreme | 22 / 25 | ONE tempting run-extension that dead-ends |
 | `runs-to-groups-redherring` | hard, extreme | 21 / 24 | TWO tempting extenders, only one correct |
 | `runs-to-groups-composed` | hard, extreme | 24 / 27 | decoy + red herring on one board, coupled |
@@ -376,10 +376,11 @@ export function validateGrid(grid: Grid): boolean
 export function getInvalidCells(grid: Grid): Set<string>
 export function getNewlyValidCells(prevGrid: Grid, newGrid: Grid): Set<string>
 ```
-OR-based coverage (not XOR — a tile at the intersection of two
-independently valid groups is fine), shared group-scanning logic, a
-tile is invalid only if it has no valid group of length ≥3 in either
-direction. Win condition: `rack.length === 0 && validateGrid(grid)` —
+**Coverage is HORIZONTAL-ONLY** (corrected in the generator-audit session by
+reading `validator.ts`; this section used to say "either direction", which the
+code has not done for a long time): a tile is valid only if its maximal
+contiguous segment within its own ROW is a valid run or group of length ≥3.
+Vertical adjacency means nothing. Win condition: `rack.length === 0 && validateGrid(grid)` —
 no bag-based fallback, ever.
 
 ### Generator + Archetypes (src/lib/generator.ts, src/lib/archetypes.ts)
@@ -783,6 +784,11 @@ src/lib/archetypes.ts     puzzle construction — all six builders
 src/lib/editorRules.ts    pure editor rules: usedIds / mintTile, TILE_COPIES cap
 src/lib/storage.ts        save/load + legacy id-less blob migration
 src/lib/generator.ts      routes generatePuzzle(diff) to archetype builder(s)
+src/lib/difficultyProxy.ts   non-par difficulty proxies (solution count, technique
+                             ladder, ...) + partitionCount, used by the
+                             runs-to-groups uniqueness gate
+src/lib/generatorAudit.ts    `npx tsx src/lib/generatorAudit.ts 200 [filter]` —
+                             the tables in GENERATOR_AUDIT.md (~10 min unfiltered)
 ```
 **Browser checks — `npm run verify:mobile` (120 checks: mobile 42, wide 24,
 touch 54). Re-run after ANY change to Board/Rack/DragPreview/TileFace/useDrag/
@@ -803,11 +809,43 @@ src/lib/pairingMin.verify.ts        31   (~9 min — BFS-bound, run it in
                                           the background and keep working)
 src/lib/storage.verify.ts           37
 src/lib/dragIdentity.verify.ts      29
+src/lib/valueGroupPlanner.verify.ts 27   (planValueGroupGoal vs its exhaustive
+                                          original; pins runs-to-groups par
+                                          11/16/20/23)
 ```
 
 ---
 
 ## Current status (update this after each session)
+### Branch `generator-audit` (2026-11-11) — pushed, NOT merged, NOT deployed
+Difficulty changes are a feel judgement: play this branch before merging it.
+Full numbers, method and the ranked open leads are in **`GENERATOR_AUDIT.md`**.
+
+**Real and verified on that branch (all runs-to-groups):**
+- `planValueGroupGoal` no longer searches L! value orders. Only the values
+  assigned to goal rows that hold a board tile can change the cost, so it tries
+  `L!/(L−k)!` ordered choices (k = occupied rows). Same minimum, proven against
+  the kept `planValueGroupGoalExhaustive` on 556 boards. L=7 build 1.1-1.3 s →
+  ~42 ms; shipped hard p95 1197 → 54 ms, extreme p95 1128 → 79 ms. ***Do not
+  delete `planValueGroupGoalExhaustive`*** — it is the differential oracle,
+  the same role `solveBag` plays.
+- **Uniqueness gate.** `buildRunsToGroupsAt` rejects a build whose bag has more
+  than one partition. 29% of easy builds had a cheaper solution that left three
+  short runs in place; now 100% unique. Consequence: the builder returns
+  `null` on ~30% of easy draws, so anything sampling it must retry
+  (`verifyEngine` and `pairingMin` were changed to retry for this reason).
+- **Deliberate par recalibration: extreme runs-to-groups is L=8 / rack 5 /
+  par 23** (was L=7 / par 20, identical to hard). 10×10 grid. No other par moved.
+- Harnesses: eleven, 358 checks, 0 failures; `npm run build` clean;
+  `verify:mobile` 120/0.
+
+**Measured but NOT changed (ranked in GENERATOR_AUDIT.md §5):** trap layers have
+only 3-6 structural shapes; red herring needs only stranding (L1) on the
+technique ladder, weaker than plain easy runs-to-groups; groups-to-runs has
+2/16/81 solutions at medium/hard/extreme; medium mixes technique levels 0-3 and
+par 9-16; no archetype combines a forced deduction chain with a trap. The
+proxies are structural and have not been checked against a human solver.
+
 ### Status as of 2026-11-11 — merged and deployed
 - **`main` now contains everything:** m=2 migration, the chain archetype, mobile
   groundwork, touch drag and the verification rig (`mobile-touch-groundwork` was
@@ -905,7 +943,10 @@ difficulty, but now tuned to land in the same range as `groups-to-runs`:
 | easy | 5 | 2 | 11 | 10.6 |
 | medium | 6 | 4 | 16 | 13.4 |
 | hard | 7 | 5 | 20 | 20.0 |
-| extreme | 7 | 5 | 20 | 23.9 |
+| extreme | 8 | 5 | 23 | 23.9 |
+
+*(extreme row updated in the generator-audit session; the two paragraphs below
+are HISTORY — the L! wall they describe is gone, see the status note above.)*
 
 **REVERTED (later session):** extreme's L=8/par-24 was tried and
 measured at ~5.3s per generation. On reflection that 10x generation-
