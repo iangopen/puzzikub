@@ -1,73 +1,118 @@
-# React + TypeScript + Vite
+# Puzzikub
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Puzzikub is a single-player tile puzzle inspired by Rummikub: every puzzle starts
+from a valid board and a small rack, and you clear the rack by rearranging the
+board into new valid sets. Puzzles are generated in the browser and each one
+comes with a par. Puzzikub is an independent fan project and is **not affiliated
+with or endorsed by** the makers of Rummikub.
 
-Currently, two official plugins are available:
+**Play it: https://iangopen.github.io/puzzikub/**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+![A hard puzzle on desktop](docs/screenshots/desktop.png)
 
-## React Compiler
+## How to play
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Tiles carry a number from 1 to 13 in one of four colours. A puzzle may hold up
+  to two copies of the same tile.
+- A **run** is three or more tiles of one colour with consecutive numbers
+  (`4 5 6 7`). A **group** is three or four tiles with the same number and all
+  different colours.
+- Sets are read **horizontally**: each unbroken stretch of tiles in a row must
+  be a valid run or group.
+- Drag rack tiles onto the board. You may also move any board tile; dropping it
+  on another tile swaps the two. Each drop counts as one move.
+- You win when the rack is empty and every set on the board is valid. The
+  obvious placement never works: building new sets means taking apart ones that
+  are already valid.
+- **Par** is the move count of the solution the generator built the puzzle
+  around. It is a target, not a proven minimum. Undo and Reset are always
+  available.
+- Four difficulties: easy, medium, hard and extreme.
 
-## Expanding the ESLint configuration
+| Phone (touch) | Neon theme |
+|---|---|
+| <img src="docs/screenshots/phone.png" alt="An easy puzzle at phone width" width="260"> | <img src="docs/screenshots/neon.png" alt="An extreme puzzle with the Neon theme" width="520"> |
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Features
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **Generated puzzles** from several construction "archetypes", including
+  puzzles with a tempting dead-end move and puzzles that need a chain of
+  deductions.
+- **Five theme presets** (Minimalist, Glass, Wood, Neon, Paper), light and dark
+  mode, sound effects (Web Audio synthesis) and a board-size setting
+  (50% to 125%).
+- **Touch support**: drag with a finger, and pan wide boards by swiping empty space.
+- **Library**: save puzzles, generate new ones at any difficulty, replay or
+  delete them. Stored in your browser's `localStorage`.
+- **Editor**: build your own board and rack, then save the puzzle to the Library.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Stack
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+React 19 · TypeScript · Vite 8 · [ogl](https://github.com/oframe/ogl) (WebGL,
+for the animated background only). It is a static site deployed to GitHub Pages
+with [gh-pages](https://github.com/tschaub/gh-pages). There is no backend.
+
+## Quick start
+
+Requires Node.js (the browser checks need Node 22+ for its built-in
+`WebSocket`, plus a local Chrome or Edge).
+
+```sh
+git clone https://github.com/iangopen/puzzikub.git
+cd puzzikub
+npm install
+npm run dev        # http://localhost:5173/puzzikub/
+npm run build      # type-check + production build into dist/
+npm run preview    # serve dist/ at http://localhost:4173/puzzikub/
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## How the engine is verified
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+All game logic lives in `src/lib/` as plain TypeScript with no React, so it can
+be checked directly. Every generated puzzle must pass four rules:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1. The starting board is already valid.
+2. The board and rack together can be split into valid sets. A solver checks
+   this exactly.
+3. The rack cannot form a valid set on its own, so you can't just lay it down
+   as a new row.
+4. Dropping each rack tile into its most obvious spot without touching the board
+   does **not** win.
+
+Twelve standalone check scripts (no test framework) re-verify these rules on
+freshly generated puzzles. They also confirm that each trap really is a dead
+end, that par matches a simulated playthrough, and that the solver agrees with
+an independent second solver. Browser checks drive a real headless Chrome
+through the Chrome DevTools Protocol, including genuine touch events.
+
+```sh
+npm run verify         # build + lint + engine checks + browser checks (~6 min)
+npm run verify:full    # the same, plus the slowest planner check (~8 min)
+npm run verify:live    # smoke-test the deployed site
 ```
+
+## Repository layout
+
+```
+src/lib/          game engine: solver, validator, puzzle builders, generator,
+                  storage, and the *.verify.ts check scripts
+src/hooks/        game state, drag handling, editor state
+src/components/   board, rack, tiles, settings, tutorial, background
+src/screens/      Play, Library and Editor screens
+scripts/          browser verification rig (Chrome DevTools Protocol, no deps)
+docs/             screenshots and project history
+```
+
+Design notes and measured results are in `CLAUDE.md`, `GENERATOR_AUDIT.md` and
+the `*_DESIGN.md` files.
+
+## Credits
+
+- **DarkVeil** animated background (the Neon theme) is from
+  [React Bits](https://reactbits.dev/backgrounds/dark-veil) by David Haz, used
+  under the React Bits license (MIT + Commons Clause). The license notice is in
+  [`src/components/DarkVeil.tsx`](src/components/DarkVeil.tsx).
+- [**ogl**](https://github.com/oframe/ogl), the WebGL library DarkVeil renders
+  with, is released under the Unlicense (public domain).
+- Rummikub is a trademark of its respective owner. It is mentioned here only to
+  describe the genre.
