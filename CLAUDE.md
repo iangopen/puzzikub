@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — Library Play fixed, Library + Editor verified in a browser (`verify:library`), `verify:live` committed; merged and deployed.*
+*Last updated: 2026-11-11 — dependency audit: `npm run verify` / `verify:full` added, 12 of 13 Dependabot alerts fixed; merged and deployed.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -14,6 +14,22 @@ base must always be '/puzzikub/' — never change this, never remove it.
 ---
 
 ## Testing & verification workflow
+### THE STANDING SAFETY NET — run this, do not list harnesses by hand
+```
+npm run verify        build + 11 engine harnesses + verify:mobile + verify:library  (~6 min)
+npm run verify:full   the same + valueGroupPlanner                                  (~8 min)
+```
+Run `verify` before AND after any change; run `verify:full` before merging.
+Exit 1 on any failure, with a per-step summary (`scripts/verify-all.mjs`). Two
+facts are built into it and must not be "simplified" away:
+- **The harnesses exit 0 even when checks fail.** The runner fails a step on any
+  `N passed, M failed` line with M > 0, not on the exit code.
+- **Timed harnesses must run one at a time.** redherring (<5ms/build) and
+  cutpoint (<50ms) assert wall-clock budgets. Running all eleven in parallel
+  broke them (23/2 and 35/1). Only pairingMin and valueGroupPlanner run in the
+  background.
+After `npm run deploy`, run `npm run verify:live`.
+
 - Local dev: `npm run dev` → http://localhost:5173/puzzikub/
 - Live site: https://iangopen.github.io/puzzikub/
 - Deploy: `npm run deploy` (builds + pushes dist/ to gh-pages branch)
@@ -827,6 +843,30 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-11 — dependency audit (branch `deps-audit`): merged and deployed
+- `npm audit fix` (never `--force`) took only patch and minor bumps, lockfile
+  only, so `package.json` ranges are unchanged. Vite 8.0.16 → 8.3.8, postcss
+  8.5.15 → 8.5.32, source-map-js 1.2.2, browserslist 4.29.5,
+  baseline-browser-mapping 2.11.35, brace-expansion 5.0.13, nanoid 3.3.20,
+  zod 4.6.7, eslint 10.4.1 → 10.14.0.
+- `npm audit`: 18 (7 high, 11 moderate) → **10 moderate**. **12 of the 13
+  GitHub alerts are fixed. All 13 were development scope.** No runtime
+  dependency (react, react-dom, ogl) was alerted, so nothing a visitor runs was
+  affected.
+- **One alert remains: `minimatch` <11.0.1 (moderate, ReDoS).** It sits under
+  eslint 10, `@eslint/config-array` and typescript-eslint, which require
+  `minimatch@^10`. The fix is minimatch 11, a major bump. npm's only "fix" is a
+  **downgrade** to eslint 9, so it was left alone. All 10 remaining
+  `npm audit` findings are this one chain. **Safe to dismiss on GitHub** (Ian's
+  call): lint tooling only, and the globs come from the repo's own eslint config,
+  never from untrusted input.
+- Bundle: JS 328.99 → 328.76 kB (gzip 102.45 → 102.39), CSS unchanged at
+  2.19 kB. `base` is still `/puzzikub/`.
+- `npm run verify` 14/14 before and after; `verify:full` 15/15 after.
+- **Pre-existing, not caused by this:** `npm run lint` reports 8 errors with
+  both the old and new eslint (measured by reinstalling the old lockfile). Lint
+  is not part of the gate. Fixing it is a separate code change.
+
 ### 2026-11-11 — Library Play + Editor: fixed, verified, merged, deployed
 - **Library Play works.** `App` keeps `savedPuzzle`. `handlePlay` sets it, and
   `PlayScreen`'s optional `savedPuzzle` prop is loaded on mount through the

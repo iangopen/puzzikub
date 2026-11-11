@@ -34,3 +34,11 @@
   by design; the NavBar's bold button was read as the pill; the rack "+" matched
   "+ add row"; generated extreme puzzles can coincide, so F was re-anchored on
   the hand-built puzzle.
+
+## 2026-11-11 — dependency audit (branch `deps-audit`)
+- Added `npm run verify` / `verify:full` (`scripts/verify-all.mjs`). The first
+  version ran harnesses in parallel and trusted exit codes. It reported 14/14 OK
+  while redherring and cutpoint had failed timing budgets. Fixed: sequential
+  timed harnesses, and failures read from summary lines.
+- `npm audit fix` (no --force): 18 → 10 findings; 12 of 13 GitHub alerts fixed.
+  minimatch (eslint 10 chain, major bump) is left and documented.
