@@ -26,7 +26,7 @@ import type { Tile, Grid } from '../types'
 import { validateGrid, getInvalidCells } from './validator'
 import { solveBag } from './solver'
 import {
-  buildComposed, buildComposedAt, type ComposedBuild,
+  buildComposed, buildComposedAt, proveComposedAt, type ComposedBuild,
   formsValidSetAlone, existsNoRelocationWin, obviousSpots,
 } from './archetypes'
 import { mixedLayoutMoves } from './mixedGoalPlanner'
@@ -259,9 +259,17 @@ for (const diff of DIFFS) {
   check(`${diff}: construction stays under 50ms/build`, times[times.length - 1] < 50)
 }
 
-console.log('\n6. buildComposedAt(L) boundary: L=5 rejected (k supports consecutive); L=6,7,8 build')
+console.log('\n6. buildComposedAt(L) boundary: L=5 rejected (k supports consecutive); L=6,7 build; L=8 needs filler {3}')
 for (const L of [5, 6, 7, 8]) {
-  const b = buildComposedAt(L)
+  // L=8 with NO filler has 5 solutions, so the UNIQUE proof step (trap-variety
+  // session) rejects it; it was never shipped. With kColour filler {3} it is
+  // unique, and that is the L=8 this section now builds.
+  if (L === 8) {
+    const bare = proveComposedAt(8)
+    const failedAt = bare.find(l => !l.ok)?.name ?? '(nothing failed)'
+    console.log(`  L=8 no filler: rejected at "${failedAt}"`)
+  }
+  const b = L === 8 ? buildComposedAt(8, { mirror: false, lowOnClean: false, fillers: [3] }) : buildComposedAt(L)
   if (L === 5) {
     console.log(`  L=${L}: ${b === null ? 'null (correctly rejected)' : 'BUILT (UNEXPECTED)'}`)
     check(`L=${L}: rejected`, b === null)
@@ -269,7 +277,8 @@ for (const L of [5, 6, 7, 8]) {
     if (!b) { check(`L=${L} builds`, false); console.log(`  L=${L}: null (UNEXPECTED)`); continue }
     const r = checkInvariants(b); const p = checkPartial(b); const sim = simulateGoal(b.grid, b.rack, b.goal)
     console.log(`  L=${L}: tiles=${b.allTiles.length} par=${b.minMoves} sim=${sim.moves} won=${sim.won} allInv=${r.ok} composition=${p.ok} grid=${b.grid.length}x${b.grid[0].length}`)
-    check(`L=${L}: invariants + composition + simulated==par + win`, r.ok && p.ok && sim.moves === b.minMoves && sim.won)
+    const bareRejected = L !== 8 || (buildComposedAt(8) === null && proveComposedAt(8).some(l => !l.ok && l.name.startsWith('UNIQUE')))
+    check(`L=${L}: invariants + composition + simulated==par + win`, r.ok && p.ok && sim.moves === b.minMoves && sim.won && bareRejected)
   }
 }
 

@@ -8,7 +8,7 @@ import { type Tile, type Grid, type Difficulty, makeTile } from '../types'
 // harnesses would catch it if they ever didn't.
 import { solveBagM2 } from './solver'
 import { isValidRun, isValidGroup, validateGrid } from './validator'
-import { type WindowSpec, bindMinCostGoal } from './mixedGoalPlanner'
+import { type WindowSpec, type Drop, bindMinCostGoal } from './mixedGoalPlanner'
 import { partitionCount } from './difficultyProxy'
 
 /** The two directions of the same Latin-rectangle duality. */
@@ -1018,6 +1018,103 @@ function decoyFillerOffsets(L: number): number[] | null {
   return null
 }
 
+// ---------------------------------------------------------------------------
+// VARIANT MACHINERY shared by the three trap layers (trap-variety session).
+//
+// Each layer used to build exactly one puzzle up to colour and value shift.
+// Each now has ONE core that takes a variant (mirror, filler set, which colours
+// carry the tempting tiles); the original puzzle is the default variant, so the
+// pre-existing harnesses still exercise the same code path and their pinned
+// pars still hold.
+//
+// Arguments do NOT transfer between variants (red herring leaks an alternate
+// win at L>=7 without a filler; decoy L=7 fillers {1} has a dead trap but ten
+// solutions). So nothing here is argued: every build runs its own named proof
+// steps against the real solver and is rejected at the first one that fails.
+// The variant tables below only list what a probe measured as passing — they
+// limit rejections, they are never what makes a build sound.
+// ---------------------------------------------------------------------------
+
+/** One named step of a construction's proof, in the order it was checked. */
+export interface ProofLine { name: string; ok: boolean }
+interface Proved<T> { build: T | null; proof: ProofLine[] }
+
+/** Runs proof steps in order; nothing after the first failure is evaluated. */
+class Proof {
+  lines: ProofLine[] = []
+  failed = false
+  step(name: string, test: () => boolean): void {
+    if (this.failed) return
+    const ok = test()
+    this.lines.push({ name, ok })
+    if (!ok) this.failed = true
+  }
+}
+
+/**
+ * A block of L consecutive values addressed by OFFSET 0..L-1, with -1 and L the
+ * two values just outside it. `mirror` reflects the offsets, so a construction
+ * written once in offsets yields both its high-end and its low-end form. Boards
+ * are always laid out by ascending value: mirroring changes which tiles exist,
+ * never the reading direction.
+ */
+interface Frame {
+  s: number
+  L: number
+  val(o: number): number
+  off(t: Tile): number
+}
+
+function makeFrame(L: number, mirror: boolean, usesBelow: boolean, usesAbove: boolean): Frame | null {
+  const needLowValue = mirror ? usesAbove : usesBelow
+  const needHighValue = mirror ? usesBelow : usesAbove
+  const sMin = needLowValue ? 2 : 1
+  const sMax = needHighValue ? 13 - L : 14 - L
+  if (sMax < sMin) return null
+  const s = randomInt(sMin, sMax)
+  return {
+    s, L,
+    val: o => (mirror ? s + L - 1 - o : s + o),
+    off: t => (mirror ? s + L - 1 - t.n : t.n - s),
+  }
+}
+
+/** Three full colour runs, one per row, every row starting at column 1. */
+function layRuns(f: Frame, boardColors: Tile['c'][], rows: number, cols: number): Grid {
+  const grid: Grid = Array.from({ length: rows }, () => Array(cols).fill(null))
+  boardColors.forEach((col, i) => { for (let v = f.s; v < f.s + f.L; v++) grid[i][1 + (v - f.s)] = makeTile(v, col) })
+  return grid
+}
+
+const runWindow = (f: Frame, color: Tile['c'], a: number, b: number): WindowSpec =>
+  ({ type: 'run', color, start: Math.min(f.val(a), f.val(b)), length: b - a + 1 })
+
+/** Committing the tiles matching `pred` leaves a remainder no partition covers. */
+function commitIsDead(all: Tile[], pred: (t: Tile) => boolean): boolean {
+  const rest = all.filter(t => !pred(t))
+  return rest.length > 0 && !solveBagM2(rest).solvable
+}
+
+/** Every non-empty combination of the tempting commitments is a dead end. */
+function everyCombinationDead(all: Tile[], commits: ((t: Tile) => boolean)[]): boolean {
+  for (let mask = 1; mask < (1 << commits.length); mask++)
+    if (!commitIsDead(all, t => commits.some((p, i) => ((mask >> i) & 1) === 1 && p(t)))) return false
+  return true
+}
+
+/** Invariants (a)-(d), as proof steps. */
+function proveInvariants(p: Proof, grid: Grid, rack: Tile[], allTiles: Tile[]): void {
+  p.step('(a) board valid at move zero', () => validateGrid(grid))
+  p.step('(c) rack is not a set on its own', () => !formsValidSetAlone(rack))
+  p.step('(b) bag solvable under solveBagM2', () => solveBagM2(allTiles).solvable)
+  p.step('(d) no no-relocation win (exhaustive)', () => {
+    const search = existsNoRelocationWin(grid, rack)
+    return !search.win && !search.exhausted
+  })
+}
+
+const pickOne = <T,>(xs: readonly T[]): T => xs[randomInt(0, xs.length - 1)]
+
 /** L per difficulty for decoys. Hard/extreme ONLY (null elsewhere) — decoys must
  * never appear on easy/medium, per DECOY_DESIGN.md. */
 function decoyParamsFor(diff: Difficulty): { L: number } | null {
@@ -1026,6 +1123,32 @@ function decoyParamsFor(diff: Difficulty): { L: number } | null {
     case 'extreme': return { L: 7 }
     default: return null
   }
+}
+
+/**
+ * `mirror` puts the decoy below the block (value s-1, short run {s-1,s,s+1})
+ * instead of above it. `fillers` are offsets of the extra kColour tiles.
+ */
+export interface DecoyVariant { mirror: boolean; fillers: number[] }
+
+/**
+ * Filler sets measured as UNIQUE with a DEAD trap, per L (probe output is in
+ * GENERATOR_AUDIT.md). The first entry of each row is what decoyFillerOffsets
+ * returns, i.e. the original puzzle. Sets the probe rejected, for the record:
+ * L=6 {0} leaks (leftover 1,2,3 is a run); L=7 {1} and {3} have a dead trap but
+ * 10 and 5 solutions.
+ */
+const DECOY_FILLERS: Record<number, number[][]> = {
+  6: [[1], [0, 1], [2], [0, 2], [1, 2]],
+  7: [[2], [0, 2], [1, 2], [0, 3], [1, 3], [0, 1, 3], [2, 3], [0, 2, 3]],
+}
+
+/** Every shipped decoy variant at this difficulty. */
+export function decoyVariants(diff: Difficulty): { L: number; variant: DecoyVariant }[] {
+  const p = decoyParamsFor(diff)
+  if (!p) return []
+  return [false, true].flatMap(mirror =>
+    (DECOY_FILLERS[p.L] ?? []).map(fillers => ({ L: p.L, variant: { mirror, fillers } })))
 }
 
 /** Superset of ArchetypeResult exposing the internals a decoy needs verified:
@@ -1038,22 +1161,47 @@ export interface DecoyBuild extends ArchetypeResult {
   runExtension: Tile[]
   s: number
   L: number
+  variant: DecoyVariant
+  witness: Drop[]
 }
 
+/** The ORIGINAL decoy for this difficulty (high end, smallest filler set). */
 export function buildDecoy(diff: Difficulty): DecoyBuild | null {
   const p = decoyParamsFor(diff)
   if (!p) return null
   return buildDecoyAt(p.L)
 }
 
-/** L-parameterized decoy core, exported for verification. */
-export function buildDecoyAt(L: number): DecoyBuild | null {
-  if (L < 5) return null // need a length-3 run plus at least one interior filler
-  const F = decoyFillerOffsets(L)
-  if (!F) return null
+/** A random shipped variant, optionally restricted (dev force types). */
+export function buildDecoyVariant(diff: Difficulty, only?: (v: DecoyVariant) => boolean): DecoyBuild | null {
+  const pool = decoyVariants(diff).filter(x => !only || only(x.variant))
+  if (pool.length === 0) return null
+  const pick = pickOne(pool)
+  return buildDecoyAt(pick.L, pick.variant)
+}
 
-  // Decoy value s+L must sit inside 1..13, so s ≤ 13-L.
-  const s = randomInt(1, 13 - L)
+/** L-parameterized decoy core. With no variant it builds the original puzzle. */
+export function buildDecoyAt(L: number, variant?: DecoyVariant): DecoyBuild | null {
+  return decoyCore(L, variant).build
+}
+
+/** The named proof steps for one variant, up to and including the first failure. */
+export function proveDecoyAt(L: number, variant?: DecoyVariant): ProofLine[] {
+  return decoyCore(L, variant).proof
+}
+
+function decoyCore(L: number, variantIn?: DecoyVariant): Proved<DecoyBuild> {
+  const none: Proved<DecoyBuild> = { build: null, proof: [] }
+  if (L < 5) return none // need a length-3 run plus at least one interior filler
+  const canonical = decoyFillerOffsets(L)
+  const variant = variantIn ?? (canonical ? { mirror: false, fillers: canonical } : null)
+  if (!variant) return none
+  const F = variant.fillers
+
+  // The decoy sits at offset L, just outside the block.
+  const f = makeFrame(L, variant.mirror, false, true)
+  if (!f) return none
+  const s = f.s
 
   const colors = shuffle(ALL_COLORS)
   const boardColors = colors.slice(0, 3)
@@ -1064,63 +1212,63 @@ export function buildDecoyAt(L: number): DecoyBuild | null {
   // Goal has L+1 windows (one short run + one group per value), one per row.
   const rows = L + 1
   const cols = L + 3
-  const grid: Grid = Array.from({ length: rows }, () => Array(cols).fill(null))
-  boardColors.forEach((col, i) => { for (let o = 0; o < L; o++) grid[i][1 + o] = makeTile(s + o, col) })
+  const grid = layRuns(f, boardColors, rows, cols)
 
-  // (a) the board shown is already fully valid.
-  if (!validateGrid(grid)) return null
-
-  // Rack: the decoy, two supports (kColour at s+L-2 / s+L-1), and interior fillers.
-  const decoy: Tile = makeTile(s + L, c)
+  // Rack: the decoy, two supports (kColour at offsets L-2 / L-1), and fillers.
+  const decoy: Tile = makeTile(f.val(L), c)
   const rack: Tile[] = [
     decoy,
-    makeTile(s + L - 2, kColor),
-    makeTile(s + L - 1, kColor),
-    ...F.map(o => makeTile(s + o, kColor)),
+    makeTile(f.val(L - 2), kColor),
+    makeTile(f.val(L - 1), kColor),
+    ...F.map(o => makeTile(f.val(o), kColor)),
   ]
-
-  // (c) the expanded rack is not already a self-contained set.
-  if (formsValidSetAlone(rack)) return null
-
   const boardTiles = grid.flat().filter((t): t is Tile => t !== null)
   const allTiles = [...boardTiles, ...rack]
 
-  // (b) board + rack really is partitionable (the decoy has a real home).
-  if (!solveBagM2(allTiles).solvable) return null
-
-  // (d) the obvious move must fail — exhaustively, not heuristically.
-  const search = existsNoRelocationWin(grid, rack)
-  if (search.win || search.exhausted) return null
+  const p = new Proof()
+  proveInvariants(p, grid, rack, allTiles)
 
   // The decoy must actually have a visible, tempting board placement.
-  if (obviousSpots(grid, decoy).length === 0) return null
+  p.step('OBVIOUS the decoy visibly extends a board run', () => obviousSpots(grid, decoy).length > 0)
 
-  // TRAP PROPERTY: commit the decoy to its obvious run-extension (colour c across
-  // s..s+L) and the remainder must be UNSOLVABLE — the tempting move is a dead end.
-  const inRunExtension = (t: Tile) => t.c === c && t.n >= s && t.n <= s + L
-  const runExtension = allTiles.filter(inRunExtension)
-  if (solveBagM2(allTiles.filter(t => !inRunExtension(t))).solvable) return null
+  // TRAP PROPERTY: commit the decoy to its obvious run-extension (all of colour
+  // c, offsets 0..L) and the remainder must be UNSOLVABLE.
+  const inRunExtension = (t: Tile) => t.c === c
+  p.step('TRAP extending the run is a dead end', () => commitIsDead(allTiles, inRunExtension))
 
-  // Deterministic hybrid goal: short run {s+L-2,s+L-1,s+L}c on row 0, then one
-  // value-group per value on the following rows.
-  const windows: WindowSpec[] = [{ type: 'run', color: c, start: s + L - 2, length: 3 }]
-  for (let o = 0; o < L; o++) {
+  // UNIQUENESS: the hybrid goal below must be the only partition, otherwise a
+  // different (possibly cheaper) answer exists and par is not what it claims.
+  p.step('UNIQUE exactly one partition', () => partitionCount(allTiles, 2) === 1)
+
+  // Deterministic hybrid goal: the short run of c on row 0, then one group per
+  // value, ascending, on the following rows.
+  const windows: WindowSpec[] = [runWindow(f, c, L - 2, L)]
+  for (let v = s; v < s + L; v++) {
+    const o = f.off(makeTile(v, c))
     let groupColors: Tile['c'][]
-    if (o === L - 2 || o === L - 1) groupColors = [...others, kColor] // c was pulled into the run
+    if (o >= L - 2) groupColors = [...others, kColor] // c was pulled into the run
     else groupColors = F.includes(o) ? [...boardColors, kColor] : [...boardColors]
-    windows.push({ type: 'group', value: s + o, colors: groupColors })
+    windows.push({ type: 'group', value: v, colors: groupColors })
   }
 
   // (e) par + witness for the hybrid goal, via the proven mixed planner core.
   // Binds each window slot to the CONCRETE tile already in grid+rack (never a
-  // freshly-minted one) and takes the CHEAPEST copy-pairing (Step 6b). This build
-  // is m=1-shaped — one tile per (value,colour) — so there is nothing to enumerate
-  // and exactly one candidate; the wrapper is here so that stays an asserted fact.
-  const res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
-  if (!res || !res.reachedGoal || !res.validGoal) return null
-  const goal = res.goal
+  // freshly-minted one) and takes the CHEAPEST copy-pairing (Step 6b).
+  const box: { res: ReturnType<typeof bindMinCostGoal> } = { res: null }
+  p.step('HOME the hybrid goal is reached, valid, with a par witness', () => {
+    box.res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
+    return !!box.res && box.res.reachedGoal && box.res.validGoal
+  })
+  if (p.failed || !box.res) return { build: null, proof: p.lines }
+  const done = box.res
 
-  return { grid, rack: shuffle(rack), allTiles, minMoves: res.moves, goal, decoy, runExtension, s, L }
+  return {
+    proof: p.lines,
+    build: {
+      grid, rack: shuffle(rack), allTiles, minMoves: done.moves, goal: done.goal, witness: done.witness,
+      decoy, runExtension: allTiles.filter(inRunExtension), s, L, variant,
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1155,7 +1303,7 @@ export function buildDecoyAt(L: number): DecoyBuild | null {
 // middle at 1/2 values, too short to run, so extend-both is a genuine dead end.
 // ---------------------------------------------------------------------------
 
-/** L per difficulty for red herrings. Hard/extreme ONLY; L∈{5,6} (see cap above). */
+/** L per difficulty for the ORIGINAL red herring. Hard/extreme ONLY. */
 function redHerringParamsFor(diff: Difficulty): { L: number } | null {
   switch (diff) {
     case 'hard': return { L: 5 }
@@ -1164,102 +1312,164 @@ function redHerringParamsFor(diff: Difficulty): { L: number } | null {
   }
 }
 
+/**
+ * `split` puts the two extenders on DIFFERENT board colours (low extender on
+ * one run, high extender on another) instead of both ends of one run.
+ * `fillers` are offsets, inside the middle [2..L-3], of extra kColour tiles.
+ */
+export interface HerringVariant { split: boolean; fillers: number[] }
+
+/**
+ * Sizes and filler sets shipped per tier, all measured (GENERATOR_AUDIT.md).
+ *
+ * THE L>=7 WALL AND WHAT GETS PAST IT. With no filler, L>=7 leaves a middle of
+ * three or more values, so "extend both ends" strands nothing: the two other
+ * colours simply stay as middle runs (7 solutions at L=7, 14 at L=8). A kColour
+ * filler in the middle forces a group there, which cuts those leftover runs
+ * below length 3 and makes extend-both a dead end again — and it is exactly
+ * that extra forced step which lifts the technique level from L1 (stranding)
+ * to L2 (chain). At L<=6 no filler is possible: any middle kColour tile makes
+ * three consecutive kColour tiles with the supports, a set in the rack alone.
+ * So L<=6 is L1 and cannot be strengthened this way; L=7 admits exactly {3};
+ * L=8 admits {3}, {4} and {3,4}.
+ *
+ * Hard keeps the small sizes (L1). Extreme ships only the L2 sizes.
+ */
+const HERRING_SHIPPED: Partial<Record<Difficulty, { L: number; fillers: number[] }[]>> = {
+  hard: [{ L: 5, fillers: [] }, { L: 6, fillers: [] }],
+  extreme: [{ L: 7, fillers: [3] }, { L: 8, fillers: [3] }, { L: 8, fillers: [4] }, { L: 8, fillers: [3, 4] }],
+}
+
+/** Every shipped red-herring variant at this difficulty. */
+export function redHerringVariants(diff: Difficulty): { L: number; variant: HerringVariant }[] {
+  return (HERRING_SHIPPED[diff] ?? []).flatMap(x =>
+    [false, true].map(split => ({ L: x.L, variant: { split, fillers: x.fillers } })))
+}
+
 /** Superset of ArchetypeResult exposing the internals a red herring needs
- * verified: the hybrid goal, both tempting extenders, and both trap sets. */
+ * verified: the hybrid goal, both tempting extenders, and the trap sets. */
 export interface RedHerringBuild extends ArchetypeResult {
   goal: Map<string, [number, number]>
   lowExtender: Tile
   highExtender: Tile
-  /** Committing the LOW obvious extension (c across s-1..s+L-1) strands the rest. */
+  /** Committing the LOW obvious extension strands the rest. */
   trapLow: Tile[]
-  /** Committing the HIGH obvious extension (c across s..s+L) strands the rest. */
+  /** Committing the HIGH obvious extension strands the rest. */
   trapHigh: Tile[]
+  /** Committing BOTH obvious extensions strands the rest. */
+  trapBoth: Tile[]
+  cLow: Tile['c']
+  cHigh: Tile['c']
   s: number
   L: number
+  variant: HerringVariant
+  witness: Drop[]
 }
 
+/** The ORIGINAL red herring for this difficulty (one colour, no filler). */
 export function buildRedHerring(diff: Difficulty): RedHerringBuild | null {
   const p = redHerringParamsFor(diff)
   if (!p) return null
   return buildRedHerringAt(p.L)
 }
 
-/** L-parameterized red-herring core, exported for verification. L∈{5,6}. */
-export function buildRedHerringAt(L: number): RedHerringBuild | null {
-  if (L < 5 || L > 6) return null // <5: no middle group; >6: extend-both leaks a win
+/** A random shipped variant, optionally restricted (dev force types). */
+export function buildRedHerringVariant(diff: Difficulty, only?: (v: HerringVariant) => boolean): RedHerringBuild | null {
+  const pool = redHerringVariants(diff).filter(x => !only || only(x.variant))
+  if (pool.length === 0) return null
+  const pick = pickOne(pool)
+  return buildRedHerringAt(pick.L, pick.variant)
+}
 
-  // Low extender needs s-1 ≥ 1; high extender value s+L ≤ 13.
-  const s = randomInt(2, 13 - L)
+/** L-parameterized red-herring core. With no variant it builds the original. */
+export function buildRedHerringAt(L: number, variant?: HerringVariant): RedHerringBuild | null {
+  return redHerringCore(L, variant).build
+}
+
+/** The named proof steps for one variant, up to and including the first failure. */
+export function proveRedHerringAt(L: number, variant?: HerringVariant): ProofLine[] {
+  return redHerringCore(L, variant).proof
+}
+
+function redHerringCore(L: number, variantIn?: HerringVariant): Proved<RedHerringBuild> {
+  const none: Proved<RedHerringBuild> = { build: null, proof: [] }
+  if (L < 5) return none // <5: no middle group, and the four supports would be a run
+  const variant = variantIn ?? { split: false, fillers: [] }
+  const F = variant.fillers
+
+  // Low extender at offset -1, high extender at offset L. Symmetric under value
+  // reflection, so there is no mirror variant: split covers both orientations.
+  const f = makeFrame(L, false, true, true)
+  if (!f) return none
+  const s = f.s
 
   const colors = shuffle(ALL_COLORS)
   const boardColors = colors.slice(0, 3)
   const kColor = colors[3]
-  const c = boardColors[randomInt(0, 2)]                 // the herring run's colour
-  const others = boardColors.filter(x => x !== c)        // the two colours that only group
+  const trapColors = shuffle(boardColors)
+  const cLow = trapColors[0]
+  const cHigh = variant.split ? trapColors[1] : cLow
+  // Group column order: trap colour(s) first, then the rest in board order.
+  const order = [cLow, ...(cHigh !== cLow ? [cHigh] : []), ...boardColors.filter(x => x !== cLow && x !== cHigh)]
 
   // Goal has L+2 windows (two short runs + one group per value), one per row.
   const rows = L + 2
   const cols = L + 3
-  const grid: Grid = Array.from({ length: rows }, () => Array(cols).fill(null))
-  boardColors.forEach((col, i) => { for (let o = 0; o < L; o++) grid[i][1 + o] = makeTile(s + o, col) })
+  const grid = layRuns(f, boardColors, rows, cols)
 
-  // (a) the board shown is already fully valid.
-  if (!validateGrid(grid)) return null
-
-  const lowExtender: Tile = makeTile(s - 1, c)
-  const highExtender: Tile = makeTile(s + L, c)
-  const rack: Tile[] = [
-    lowExtender,
-    highExtender,
-    makeTile(s, kColor), makeTile(s + 1, kColor),             // supports for the LOW short run
-    makeTile(s + L - 2, kColor), makeTile(s + L - 1, kColor), // supports for the HIGH short run
-  ]
-
-  // (c) the expanded rack is not already a self-contained set.
-  if (formsValidSetAlone(rack)) return null
-
+  const lowExtender: Tile = makeTile(s - 1, cLow)
+  const highExtender: Tile = makeTile(s + L, cHigh)
+  const supports = [0, 1, L - 2, L - 1]
+  const rack: Tile[] = [lowExtender, highExtender, ...[...supports, ...F].map(o => makeTile(s + o, kColor))]
   const boardTiles = grid.flat().filter((t): t is Tile => t !== null)
   const allTiles = [...boardTiles, ...rack]
 
-  // (b) board + rack really is partitionable (both extenders have real homes).
-  if (!solveBagM2(allTiles).solvable) return null
+  const p = new Proof()
+  proveInvariants(p, grid, rack, allTiles)
 
-  // (d) the obvious moves must fail — exhaustively, not heuristically.
-  const search = existsNoRelocationWin(grid, rack)
-  if (search.win || search.exhausted) return null
+  // OBVIOUS x2: both extenders must have a visible, tempting board placement.
+  p.step('OBVIOUS the low extender visibly extends a board run', () => obviousSpots(grid, lowExtender).length > 0)
+  p.step('OBVIOUS the high extender visibly extends a board run', () => obviousSpots(grid, highExtender).length > 0)
 
-  // OBVIOUS ×2: both extenders must have a visible, tempting board placement.
-  if (obviousSpots(grid, lowExtender).length === 0) return null
-  if (obviousSpots(grid, highExtender).length === 0) return null
+  // TRAP: each obvious extension, and both together, strands the rest.
+  const inLow = (t: Tile) => t.c === cLow && t.n <= s + L - 1
+  const inHigh = (t: Tile) => t.c === cHigh && t.n >= s
+  p.step('TRAP the low extension is a dead end', () => commitIsDead(allTiles, inLow))
+  p.step('TRAP the high extension is a dead end', () => commitIsDead(allTiles, inHigh))
+  p.step('TRAP every combination of extensions is a dead end', () => everyCombinationDead(allTiles, [inLow, inHigh]))
+  p.step('UNIQUE exactly one partition', () => partitionCount(allTiles, 2) === 1)
 
-  // TRAP ×2 (the interaction): committing EITHER obvious extension strands the
-  // rest — chiefly by orphaning the OTHER extender (its short-run home is gone).
-  const inHigh = (t: Tile) => t.c === c && t.n >= s && t.n <= s + L
-  const inLow = (t: Tile) => t.c === c && t.n >= s - 1 && t.n <= s + L - 1
-  const trapHigh = allTiles.filter(inHigh)
-  const trapLow = allTiles.filter(inLow)
-  if (solveBagM2(allTiles.filter(t => !inHigh(t))).solvable) return null
-  if (solveBagM2(allTiles.filter(t => !inLow(t))).solvable) return null
-
-  // Deterministic hybrid goal: two short runs of c (low + high), then one group
-  // per value — c-middle stays {c,o1,o2}, the four vacated ends are {o1,o2,k}.
+  // Deterministic hybrid goal: a short run at each end, then one group per
+  // value. A colour is absent from a group where its short run pulled it out;
+  // kColour steps in at the four supports and at every filler.
   const windows: WindowSpec[] = [
-    { type: 'run', color: c, start: s - 1, length: 3 },
-    { type: 'run', color: c, start: s + L - 2, length: 3 },
+    { type: 'run', color: cLow, start: s - 1, length: 3 },
+    { type: 'run', color: cHigh, start: s + L - 2, length: 3 },
   ]
   for (let o = 0; o < L; o++) {
-    const pulled = o === 0 || o === 1 || o === L - 2 || o === L - 1
-    windows.push({ type: 'group', value: s + o, colors: pulled ? [...others, kColor] : [c, ...others] })
+    const groupColors = order.filter(col => !(col === cLow && o <= 1) && !(col === cHigh && o >= L - 2))
+    if (supports.includes(o) || F.includes(o)) groupColors.push(kColor)
+    windows.push({ type: 'group', value: s + o, colors: groupColors })
   }
 
-  // (e) + GENUINE HOME ×2: both extenders sit in the two short runs; the whole
-  // hybrid reaches a validateGrid win with an exact par + witness. Concrete-tile
-  // binding + cheapest copy-pairing — see buildDecoyAt.
-  const res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
-  if (!res || !res.reachedGoal || !res.validGoal) return null
-  const goal = res.goal
+  const box: { res: ReturnType<typeof bindMinCostGoal> } = { res: null }
+  p.step('HOME the hybrid goal is reached, valid, with a par witness', () => {
+    box.res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
+    return !!box.res && box.res.reachedGoal && box.res.validGoal
+  })
+  if (p.failed || !box.res) return { build: null, proof: p.lines }
+  const done = box.res
 
-  return { grid, rack: shuffle(rack), allTiles, minMoves: res.moves, goal, lowExtender, highExtender, trapLow, trapHigh, s, L }
+  return {
+    proof: p.lines,
+    build: {
+      grid, rack: shuffle(rack), allTiles, minMoves: done.moves, goal: done.goal, witness: done.witness,
+      lowExtender, highExtender,
+      trapLow: allTiles.filter(inLow), trapHigh: allTiles.filter(inHigh),
+      trapBoth: allTiles.filter(t => inLow(t) || inHigh(t)),
+      cLow, cHigh, s, L, variant,
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,7 +1525,7 @@ export function buildRedHerringAt(L: number): RedHerringBuild | null {
 // decoy append is not yet a dead end. Verified directly in composed.verify.ts.
 // ---------------------------------------------------------------------------
 
-/** L per difficulty for composed puzzles. Hard/extreme ONLY; L >= 6 (see cap). */
+/** L per difficulty for the ORIGINAL composed puzzle. Hard/extreme ONLY. */
 function composedParamsFor(diff: Difficulty): { L: number } | null {
   switch (diff) {
     case 'hard': return { L: 6 }
@@ -1324,137 +1534,184 @@ function composedParamsFor(diff: Difficulty): { L: number } | null {
   }
 }
 
+/**
+ * `mirror` reflects the whole layout (the run-only zone moves to the low end).
+ * `lowOnClean` puts the single opposite-end extender on the THIRD colour (the
+ * one whose run fills the run-only zone) instead of on the herring colour — so
+ * all three board colours carry a tempting tile.
+ * `fillers` are offsets of extra kColour tiles among the pure-group values.
+ */
+export interface ComposedVariant { mirror: boolean; lowOnClean: boolean; fillers: number[] }
+
+/**
+ * Sizes and filler sets shipped per tier, all measured (GENERATOR_AUDIT.md).
+ * Composed is the tightest of the three: L=6 and L=7 are unique only with NO
+ * filler (L=7 {3} has 2 solutions), and L=8 is unique only WITH filler {3}
+ * (no filler: 5-7 solutions and the third-colour low trap leaks; {4}: 2).
+ */
+const COMPOSED_SHIPPED: Partial<Record<Difficulty, { L: number; fillers: number[] }[]>> = {
+  hard: [{ L: 6, fillers: [] }],
+  extreme: [{ L: 7, fillers: [] }, { L: 8, fillers: [3] }],
+}
+
+/** Every shipped composed variant at this difficulty. */
+export function composedVariants(diff: Difficulty): { L: number; variant: ComposedVariant }[] {
+  return (COMPOSED_SHIPPED[diff] ?? []).flatMap(x =>
+    [false, true].flatMap(mirror => [false, true].map(lowOnClean =>
+      ({ L: x.L, variant: { mirror, lowOnClean, fillers: x.fillers } }))))
+}
+
 /** Superset of ArchetypeResult exposing everything the composition needs
- * verified: both traps' tempting tiles, all three trap sets, and the correct
- * short runs used to test cross-trap independence. */
+ * verified: the tempting tiles, the trap sets, and the correct short runs used
+ * to test cross-trap independence. */
 export interface ComposedBuild extends ArchetypeResult {
   goal: Map<string, [number, number]>
   /** One-ended decoy tile, colour cD. */
   decoy: Tile
-  /** Two-ended red-herring extenders, colour cH. */
+  /** The opposite-end extender (colour cH, or cC when `lowOnClean`). */
   lowExtender: Tile
+  /** The second same-end extender, colour cH. */
   highExtender: Tile
-  /** Committing cD's obvious append (cD across s..s+L) strands the rest. */
+  /** Committing cD's obvious append strands the rest. */
   trapDecoy: Tile[]
-  /** Committing cH's obvious HIGH append (cH across s..s+L) strands the rest. */
+  /** Committing cH's obvious same-end append strands the rest. */
   trapHigh: Tile[]
-  /** Committing cH's obvious LOW append (cH across s-1..s+L-1) strands the rest. */
+  /** Committing the opposite-end extender's obvious append strands the rest. */
   trapLow: Tile[]
-  /** Extending cH at BOTH ends (cH across s-1..s+L) strands the rest. */
+  /** Committing both of the last two strands the rest. */
   trapBoth: Tile[]
   /** cD's genuine short run — "the decoy trap, correctly resolved". */
   decoyResolved: Tile[]
-  /** cH's two genuine short runs — "the herring trap, correctly resolved". */
+  /** The other two genuine short runs — "the herring trap, correctly resolved". */
   herringResolved: Tile[]
   cDecoy: Tile['c']
   cHerring: Tile['c']
   cClean: Tile['c']
   s: number
   L: number
+  variant: ComposedVariant
+  witness: Drop[]
 }
 
+/** The ORIGINAL composed puzzle for this difficulty. */
 export function buildComposed(diff: Difficulty): ComposedBuild | null {
   const p = composedParamsFor(diff)
   if (!p) return null
   return buildComposedAt(p.L)
 }
 
-/** L-parameterized composed core, exported for verification. L >= 6. */
-export function buildComposedAt(L: number): ComposedBuild | null {
-  if (L < 6) return null // L=5: k supports would be 3-consecutive, and decoy append survives
+/** A random shipped variant, optionally restricted (dev force types). */
+export function buildComposedVariant(diff: Difficulty, only?: (v: ComposedVariant) => boolean): ComposedBuild | null {
+  const pool = composedVariants(diff).filter(x => !only || only(x.variant))
+  if (pool.length === 0) return null
+  const pick = pickOne(pool)
+  return buildComposedAt(pick.L, pick.variant)
+}
 
-  // Lo needs s-1 >= 1; D and H need s+L <= 13.
-  const s = randomInt(2, 13 - L)
+/** L-parameterized composed core. With no variant it builds the original. */
+export function buildComposedAt(L: number, variant?: ComposedVariant): ComposedBuild | null {
+  return composedCore(L, variant).build
+}
+
+/** The named proof steps for one variant, up to and including the first failure. */
+export function proveComposedAt(L: number, variant?: ComposedVariant): ProofLine[] {
+  return composedCore(L, variant).proof
+}
+
+function composedCore(L: number, variantIn?: ComposedVariant): Proved<ComposedBuild> {
+  const none: Proved<ComposedBuild> = { build: null, proof: [] }
+  if (L < 6) return none // L=5: k supports would be 3-consecutive, and decoy append survives
+  const variant = variantIn ?? { mirror: false, lowOnClean: false, fillers: [] }
+  const F = variant.fillers
+
+  // Offsets -1 and L are both used, whichever way round the block is read.
+  const f = makeFrame(L, variant.mirror, true, true)
+  if (!f) return none
+  const s = f.s
 
   const colors = shuffle(ALL_COLORS)
   const boardColors = colors.slice(0, 3)
   const kColor = colors[3]
   const [cDecoy, cHerring, cClean] = shuffle(boardColors) as [Tile['c'], Tile['c'], Tile['c']]
+  const cLow = variant.lowOnClean ? cClean : cHerring // colour of the opposite-end extender
 
   // Goal has 4 runs + (L-2) groups = L+2 windows, one per row.
   const rows = L + 2
   const cols = L + 3
-  const grid: Grid = Array.from({ length: rows }, () => Array(cols).fill(null))
-  boardColors.forEach((col, i) => { for (let o = 0; o < L; o++) grid[i][1 + o] = makeTile(s + o, col) })
+  const grid = layRuns(f, boardColors, rows, cols)
 
-  // (a) the board shown is already fully valid.
-  if (!validateGrid(grid)) return null
-
-  const decoy: Tile = makeTile(s + L, cDecoy)
-  const lowExtender: Tile = makeTile(s - 1, cHerring)
-  const highExtender: Tile = makeTile(s + L, cHerring)
-  const rack: Tile[] = [
-    decoy, lowExtender, highExtender,
-    makeTile(s, kColor), makeTile(s + 1, kColor), // cHerring's low run vacates these
-    makeTile(s + L - 3, kColor),                  // cClean's run vacates this one
-  ]
-
-  // (c) the rack is not a self-contained puzzle. This is the check that rejects
-  // L=5, where the three kColour supports would be consecutive.
-  if (formsValidSetAlone(rack)) return null
-
+  const decoy: Tile = makeTile(f.val(L), cDecoy)
+  const lowExtender: Tile = makeTile(f.val(-1), cLow)
+  const highExtender: Tile = makeTile(f.val(L), cHerring)
+  const supports = [0, 1, L - 3] // cLow's short run vacates 0,1; cClean's run vacates L-3
+  const rack: Tile[] = [decoy, lowExtender, highExtender, ...[...supports, ...F].map(o => makeTile(f.val(o), kColor))]
   const boardTiles = grid.flat().filter((t): t is Tile => t !== null)
   const allTiles = [...boardTiles, ...rack]
 
-  // (b) board + rack really is partitionable (all three tempting tiles have homes).
-  if (!solveBagM2(allTiles).solvable) return null
-
-  // (d) no way to empty the rack without relocating a board tile — exhaustive.
-  const search = existsNoRelocationWin(grid, rack)
-  if (search.win || search.exhausted) return null
+  const p = new Proof()
+  // (c) is the check that rejects L=5, where the three supports are consecutive.
+  proveInvariants(p, grid, rack, allTiles)
 
   // OBVIOUS x3: all three tempting tiles must read as plausible run-extensions.
-  if (obviousSpots(grid, decoy).length === 0) return null
-  if (obviousSpots(grid, lowExtender).length === 0) return null
-  if (obviousSpots(grid, highExtender).length === 0) return null
+  p.step('OBVIOUS the decoy visibly extends a board run', () => obviousSpots(grid, decoy).length > 0)
+  p.step('OBVIOUS the opposite-end extender visibly extends a board run', () => obviousSpots(grid, lowExtender).length > 0)
+  p.step('OBVIOUS the second same-end extender visibly extends a board run', () => obviousSpots(grid, highExtender).length > 0)
 
-  // TRAP x4: every obvious append, and the herring's extend-both, is a dead end.
-  const inSpan = (c: Tile['c'], lo: number, hi: number) => (t: Tile) => t.c === c && t.n >= lo && t.n <= hi
-  const isDecoyTrap = inSpan(cDecoy, s, s + L)
-  const isHighTrap = inSpan(cHerring, s, s + L)
-  const isLowTrap = inSpan(cHerring, s - 1, s + L - 1)
-  const isBothTrap = inSpan(cHerring, s - 1, s + L)
-  const dead = (pred: (t: Tile) => boolean) => !solveBagM2(allTiles.filter(t => !pred(t))).solvable
-  if (!dead(isDecoyTrap) || !dead(isHighTrap) || !dead(isLowTrap) || !dead(isBothTrap)) return null
+  // TRAP: every obvious append, and every combination of them, is a dead end.
+  const isDecoyTrap = (t: Tile) => t.c === cDecoy
+  const isHighTrap = (t: Tile) => t.c === cHerring && f.off(t) >= 0
+  const isLowTrap = (t: Tile) => t.c === cLow && f.off(t) <= L - 1
+  const isBothTrap = (t: Tile) => isHighTrap(t) || isLowTrap(t)
+  p.step("TRAP the decoy's extension is a dead end", () => commitIsDead(allTiles, isDecoyTrap))
+  p.step('TRAP the same-end extension is a dead end', () => commitIsDead(allTiles, isHighTrap))
+  p.step('TRAP the opposite-end extension is a dead end', () => commitIsDead(allTiles, isLowTrap))
+  p.step('TRAP both of those together are a dead end', () => commitIsDead(allTiles, isBothTrap))
+  p.step('TRAP every combination of extensions is a dead end',
+    () => everyCombinationDead(allTiles, [isDecoyTrap, isHighTrap, isLowTrap]))
+  p.step('UNIQUE exactly one partition', () => partitionCount(allTiles, 2) === 1)
 
-  // Deterministic hybrid goal — never planMixedGoal's factorial search.
-  const others = [cDecoy, cHerring, cClean]
+  // Deterministic hybrid goal — never planMixedGoal's factorial search. Four
+  // short runs, then one group per pure-group value (offsets 0..L-3), ascending.
   const windows: WindowSpec[] = [
-    { type: 'run', color: cDecoy, start: s + L - 2, length: 3 },
-    { type: 'run', color: cHerring, start: s - 1, length: 3 },
-    { type: 'run', color: cHerring, start: s + L - 2, length: 3 },
-    { type: 'run', color: cClean, start: s + L - 3, length: 3 },
+    runWindow(f, cDecoy, L - 2, L),
+    runWindow(f, cLow, -1, 1),
+    runWindow(f, cHerring, L - 2, L),
+    runWindow(f, cClean, L - 3, L - 1),
   ]
-  for (let o = 0; o <= L - 3; o++) {
+  const groupOffsets = Array.from({ length: L - 2 }, (_, o) => o).sort((a, b) => f.val(a) - f.val(b))
+  for (const o of groupOffsets) {
     // Which board colour has been pulled into a run at this value decides who
-    // fills the group; kColour steps in exactly where one has been pulled.
-    let groupColors: Tile['c'][]
-    if (o === 0 || o === 1) groupColors = [cDecoy, cClean, kColor]      // cHerring in its low run
-    else if (o === L - 3) groupColors = [cDecoy, cHerring, kColor]      // cClean in its run
-    else groupColors = [...others]                                      // all three board colours
-    windows.push({ type: 'group', value: s + o, colors: groupColors })
+    // fills the group; kColour steps in at the supports and the fillers.
+    const groupColors = [cDecoy, cHerring, cClean].filter(col => !(col === cLow && o <= 1) && !(col === cClean && o === L - 3))
+    if (supports.includes(o) || F.includes(o)) groupColors.push(kColor)
+    windows.push({ type: 'group', value: f.val(o), colors: groupColors })
   }
 
-  // (e) par + witness for the combined hybrid goal, via the proven mixed core.
-  // Concrete-tile binding + cheapest copy-pairing — see buildDecoyAt.
-  const res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
-  if (!res || !res.reachedGoal || !res.validGoal) return null
-  const goal = res.goal
+  const box: { res: ReturnType<typeof bindMinCostGoal> } = { res: null }
+  p.step('HOME the hybrid goal is reached, valid, with a par witness', () => {
+    box.res = bindMinCostGoal(windows, grid, rack, (wi, i) => [wi, 1 + i])
+    return !!box.res && box.res.reachedGoal && box.res.validGoal
+  })
+  if (p.failed || !box.res) return { build: null, proof: p.lines }
+  const done = box.res
 
   // Select the CONCRETE tiles from the bag rather than minting fresh ones, so the
   // reported spans carry the same ids (and objects) the grid/rack hold.
-  const span = (c: Tile['c'], lo: number, hi: number): Tile[] =>
-    allTiles.filter(t => t.c === c && t.n >= lo && t.n <= hi)
+  const span = (col: Tile['c'], a: number, b: number): Tile[] =>
+    allTiles.filter(t => t.c === col && f.off(t) >= a && f.off(t) <= b)
   return {
-    grid, rack: shuffle(rack), allTiles, minMoves: res.moves, goal,
-    decoy, lowExtender, highExtender,
-    trapDecoy: allTiles.filter(isDecoyTrap),
-    trapHigh: allTiles.filter(isHighTrap),
-    trapLow: allTiles.filter(isLowTrap),
-    trapBoth: allTiles.filter(isBothTrap),
-    decoyResolved: span(cDecoy, s + L - 2, s + L),
-    herringResolved: [...span(cHerring, s - 1, s + 1), ...span(cHerring, s + L - 2, s + L)],
-    cDecoy, cHerring, cClean, s, L,
+    proof: p.lines,
+    build: {
+      grid, rack: shuffle(rack), allTiles, minMoves: done.moves, goal: done.goal, witness: done.witness,
+      decoy, lowExtender, highExtender,
+      trapDecoy: allTiles.filter(isDecoyTrap),
+      trapHigh: allTiles.filter(isHighTrap),
+      trapLow: allTiles.filter(isLowTrap),
+      trapBoth: allTiles.filter(isBothTrap),
+      decoyResolved: span(cDecoy, L - 2, L),
+      herringResolved: [...span(cLow, -1, 1), ...span(cHerring, L - 2, L)],
+      cDecoy, cHerring, cClean, s, L, variant,
+    },
   }
 }
 
@@ -1567,6 +1824,7 @@ export interface ChainBuild extends ArchetypeResult {
   blocks: Tile[][]
   hinges: number[]
   runCols: Tile['c'][]
+  witness: Drop[]
 }
 
 export function buildChain(diff: Difficulty): ChainBuild | null {
@@ -1575,8 +1833,27 @@ export function buildChain(diff: Difficulty): ChainBuild | null {
   return buildChainAt(p.links)
 }
 
+/**
+ * `mirror` reflects the ladder, so it descends: the first run sits at the top
+ * of the value range and each hinge is BELOW its run. `rowOrder` permutes the
+ * board rows (indices into the default order: the runs in ladder order, then
+ * the final group). Mirror changes which tiles exist; row order is layout only
+ * — it hides where the ladder starts, it does not change the deduction.
+ */
+export interface ChainVariant { mirror: boolean; rowOrder?: number[] }
+
+/** A random shipped variant: either direction, board rows in random order. */
+export function buildChainVariant(diff: Difficulty, only?: (v: ChainVariant) => boolean): ChainBuild | null {
+  const p = chainParamsFor(diff)
+  if (!p) return null
+  const pool = [false, true].map(mirror => ({ mirror })).filter(v => !only || only(v))
+  if (pool.length === 0) return null
+  const rowOrder = shuffle(Array.from({ length: p.links + 1 }, (_, i) => i))
+  return buildChainAt(p.links, undefined, undefined, { mirror: pickOne(pool).mirror, rowOrder })
+}
+
 /** links-parameterized chain core, exported for verification. */
-export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c'][]): ChainBuild | null {
+export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c'][], variant?: ChainVariant): ChainBuild | null {
   if (links < 2 || links > 4) return null // 4 colours, and hinges are 3 apart
   const runCols = (colsIn ?? shuffle(ALL_COLORS)).slice(0, links)
   if (new Set(runCols).size !== links) return null
@@ -1612,6 +1889,16 @@ export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c']
   const lastH = hinges[hinges.length - 1]
   if (!claim(ALL_COLORS.filter(c => c !== runCols[links - 1]).map(c => makeTile(lastH, c)))) return null
 
+  // MIRROR: reflect every value about the middle of the ladder. Runs stay runs
+  // and groups stay groups, so the partition is the same partition read
+  // downwards — but the gates below are still run on the reflected bag.
+  if (variant?.mirror) {
+    const span = s + lastH
+    for (let i = 0; i < blocks.length; i++)
+      blocks[i] = blocks[i].map(t => makeTile(span - t.n, t.c)).sort((a, b) => a.n - b.n)
+    for (let i = 0; i < hinges.length; i++) hinges[i] = span - hinges[i]
+  }
+
   // ---- the board: every run block EXTENDED by its hinge tile (a longer, still
   // valid run — this is what hides the ladder), plus the FINAL group as a row.
   // The final group must sit on the board: left in the rack it would be a valid
@@ -1623,8 +1910,11 @@ export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c']
     if (!isRun(b)) continue
     const c = b[0].c
     const lo = Math.min(...b.map(t => t.n))
-    const hinge = blocks.flat().find(t => t.c === c && t.n === lo - 1)
-    const row = hinge ? [hinge, ...b] : [...b]
+    const hi = Math.max(...b.map(t => t.n))
+    // The hinge is the one same-colour tile touching the run: below it on the
+    // ascending ladder, above it on the mirrored one.
+    const hinge = blocks.flat().find(t => t.c === c && (t.n === lo - 1 || t.n === hi + 1))
+    const row = hinge ? [hinge, ...b].sort((x, y) => x.n - y.n) : [...b]
     if (!isValidRun(row)) return null
     boardRows.push(row)
     row.forEach(t => onBoard.add(`${t.n}_${t.c}`))
@@ -1633,6 +1923,14 @@ export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c']
   if (finalGroup.some(t => onBoard.has(`${t.n}_${t.c}`))) return null
   boardRows.push(finalGroup)
   finalGroup.forEach(t => onBoard.add(`${t.n}_${t.c}`))
+
+  // ROW ORDER: every row still starts at column 1; only which row is which moves.
+  if (variant?.rowOrder) {
+    const order = variant.rowOrder
+    if (order.length !== boardRows.length || new Set(order).size !== order.length || order.some(i => !boardRows[i])) return null
+    const original = [...boardRows]
+    order.forEach((from, to) => { boardRows[to] = original[from] })
+  }
 
   const allTiles = blocks.flat()
   const rack = allTiles.filter(t => !onBoard.has(`${t.n}_${t.c}`))
@@ -1677,7 +1975,7 @@ export function buildChainAt(links: number, startIn?: number, colsIn?: Tile['c']
   const res = bindMinCostGoal(windows, grid, rack, (wi, i) => cells[wi][i])
   if (!res || !res.reachedGoal || !res.validGoal) return null       // (e)
 
-  return { grid, rack, allTiles, minMoves: res.moves, goal: res.goal, blocks, hinges, runCols }
+  return { grid, rack, allTiles, minMoves: res.moves, goal: res.goal, witness: res.witness, blocks, hinges, runCols }
 }
 
 /** Every valid set (run or group) inside `bag` containing `t`. m=1 only — the

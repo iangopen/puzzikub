@@ -1,5 +1,8 @@
 import type { Difficulty, Puzzle } from '../types'
-import { buildChain, buildComposed, buildCutPoint, buildDecoy, buildRedHerring, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType } from './archetypes'
+import {
+  buildChain, buildChainVariant, buildComposed, buildComposedVariant, buildCutPoint, buildDecoy, buildDecoyVariant,
+  buildRedHerring, buildRedHerringVariant, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType, type ArchetypeResult,
+} from './archetypes'
 
 const BUILDERS: Record<ArchetypeType, (diff: Difficulty) => ReturnType<typeof buildGroupsToRuns>> = {
   'groups-to-runs': buildGroupsToRuns,
@@ -21,7 +24,12 @@ const BUILDERS: Record<ArchetypeType, (diff: Difficulty) => ReturnType<typeof bu
  */
 const COMPOSED_PROB: Partial<Record<Difficulty, number>> = { hard: 0.12, extreme: 0.25 }
 const DECOY_PROB: Partial<Record<Difficulty, number>> = { hard: 0.20, extreme: 0.30 }
-const REDHERRING_PROB: Partial<Record<Difficulty, number>> = { hard: 0.14, extreme: 0.22 }
+// Red herring at HARD was cut from 0.14 to 0.08 in the trap-variety session: at
+// the sizes hard uses (L=5,6) it cannot be lifted above technique level L1 (see
+// HERRING_SHIPPED in archetypes.ts), so it is the weakest layer in the tier. The
+// freed 0.06 falls through to the base archetypes. Extreme is unchanged because
+// extreme now ships only the L=7/8 filler variants, which are L2.
+const REDHERRING_PROB: Partial<Record<Difficulty, number>> = { hard: 0.08, extreme: 0.22 }
 
 /**
  * The cut-point layer (m=2 Step 11) — MEDIUM ONLY, and deliberately its own
@@ -45,6 +53,13 @@ const CUTPOINT_PROB: Partial<Record<Difficulty, number>> = { medium: 0.25 }
 const CHAIN_PROB: Partial<Record<Difficulty, number>> = { medium: 0.20 }
 
 /**
+ * Builder calls made and builder calls that returned null, across every retry
+ * loop below. Read (and reset) by the audit and the harnesses: a retry loop hides
+ * a builder that has started rejecting most of its draws, this does not.
+ */
+export const generationStats = { attempts: 0, rejected: 0 }
+
+/**
  * DEV-ONLY escape hatch for playtesting a specific variant. Not reachable from
  * any UI control — PlayScreen only honours it when the developer deliberately
  * types ?forceArchetype=... into the URL. See FORCE_TYPES below.
@@ -57,10 +72,23 @@ export type ForceType =
   | 'composed'
   | 'cut-point'
   | 'chain'
+  // Sub-families of the four layers above, so one can be played by name.
+  // '<layer>' alone draws any shipped variant; '-classic' is the original puzzle.
+  | 'decoy-classic'
+  | 'decoy-mirror'
+  | 'red-herring-classic'
+  | 'red-herring-split'
+  | 'composed-classic'
+  | 'composed-mirror'
+  | 'composed-third'
+  | 'chain-classic'
+  | 'chain-mirror'
 
 /** The accepted values, for validating untrusted input (e.g. a query param). */
 export const FORCE_TYPES: readonly ForceType[] = [
   'pure-groups-to-runs', 'pure-runs-to-groups', 'decoy', 'red-herring', 'composed', 'cut-point', 'chain',
+  'decoy-classic', 'decoy-mirror', 'red-herring-classic', 'red-herring-split',
+  'composed-classic', 'composed-mirror', 'composed-third', 'chain-classic', 'chain-mirror',
 ]
 
 export function isForceType(v: string | null | undefined): v is ForceType {
@@ -95,6 +123,15 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
       case 'composed': return generateComposed(diff)
       case 'cut-point': return generateCutPoint(diff)
       case 'chain': return generateChain(diff)
+      case 'decoy-classic': return generateDecoy(diff, buildDecoy)
+      case 'decoy-mirror': return generateDecoy(diff, d => buildDecoyVariant(d, v => v.mirror))
+      case 'red-herring-classic': return generateRedHerring(diff, buildRedHerring)
+      case 'red-herring-split': return generateRedHerring(diff, d => buildRedHerringVariant(d, v => v.split))
+      case 'composed-classic': return generateComposed(diff, buildComposed)
+      case 'composed-mirror': return generateComposed(diff, d => buildComposedVariant(d, v => v.mirror))
+      case 'composed-third': return generateComposed(diff, d => buildComposedVariant(d, v => v.lowOnClean))
+      case 'chain-classic': return generateChain(diff, buildChain)
+      case 'chain-mirror': return generateChain(diff, d => buildChainVariant(d, v => v.mirror))
     }
   }
 
@@ -135,10 +172,12 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
 /** Chain puzzles: the board is a set of already-valid rows whose unique
  * partition can only be deduced in sequence. Same hidden-tag convention as the
  * other layers — nothing player-facing names the mechanic or the chain order. */
-function generateChain(diff: Difficulty): Puzzle | null {
+type TrapBuilder = (diff: Difficulty) => ArchetypeResult | null
+function generateChain(diff: Difficulty, build: TrapBuilder = buildChainVariant): Puzzle | null {
   for (let i = 0; i < 40; i++) {
-    const result = buildChain(diff)
-    if (!result) continue
+    const result = build(diff)
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -160,7 +199,8 @@ function generateChain(diff: Difficulty): Puzzle | null {
 function generateCutPoint(diff: Difficulty): Puzzle | null {
   for (let i = 0; i < 40; i++) {
     const result = buildCutPoint(diff)
-    if (!result) continue
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -177,10 +217,11 @@ function generateCutPoint(diff: Difficulty): Puzzle | null {
 
 /** Composed puzzles (decoy + red herring on one board), same hidden-tag
  * convention as the single-trap layers. */
-function generateComposed(diff: Difficulty): Puzzle | null {
+function generateComposed(diff: Difficulty, build: TrapBuilder = buildComposedVariant): Puzzle | null {
   for (let i = 0; i < 40; i++) {
-    const result = buildComposed(diff)
-    if (!result) continue
+    const result = build(diff)
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -197,10 +238,11 @@ function generateComposed(diff: Difficulty): Puzzle | null {
 
 /** Decoy puzzles reuse the shared Puzzle shape; the hidden `archetypeId` marks
  * them internally (nothing player-facing reads it), consistent with direction. */
-function generateDecoy(diff: Difficulty): Puzzle | null {
+function generateDecoy(diff: Difficulty, build: TrapBuilder = buildDecoyVariant): Puzzle | null {
   for (let i = 0; i < 40; i++) {
-    const result = buildDecoy(diff)
-    if (!result) continue
+    const result = build(diff)
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -216,10 +258,11 @@ function generateDecoy(diff: Difficulty): Puzzle | null {
 }
 
 /** Red-herring puzzles, same hidden-tag convention as decoy. */
-function generateRedHerring(diff: Difficulty): Puzzle | null {
+function generateRedHerring(diff: Difficulty, build: TrapBuilder = buildRedHerringVariant): Puzzle | null {
   for (let i = 0; i < 40; i++) {
-    const result = buildRedHerring(diff)
-    if (!result) continue
+    const result = build(diff)
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -238,7 +281,8 @@ export function generateArchetype(type: ArchetypeType, diff: Difficulty): Puzzle
   const build = BUILDERS[type]
   for (let i = 0; i < 40; i++) {
     const result = build(diff)
-    if (!result) continue
+    generationStats.attempts++
+    if (!result) { generationStats.rejected++; continue }
 
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

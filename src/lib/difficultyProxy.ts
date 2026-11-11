@@ -351,3 +351,36 @@ export function techniqueLadder(bag: Tile[]): TechniqueLadder {
   }
   return { steps, maxLevel: steps[3] ? 3 : steps[2] ? 2 : steps[1] ? 1 : 0 }
 }
+
+/**
+ * How much reasoning it takes to see that committing `committed` is a mistake.
+ *   0  it is not a mistake: the remainder is still solvable
+ *   1  some remaining tile is left with no set at all (visible at once)
+ *   2  no tile is stranded yet, but following forced singles strands one
+ *   3  the remainder is unsolvable, yet neither of the above shows it
+ * The trap layers' "tempting" commitments are graded with this: depth 1 is a
+ * trap that announces itself, depth 2+ only fails after a further forced step.
+ */
+export function refutationDepth(bag: Tile[], committed: Tile[]): 0 | 1 | 2 | 3 {
+  const ids = new Set(committed.map(t => t.id))
+  const rest = bag.filter(t => !ids.has(t.id))
+  if (rest.length === 0 || solveBagM2(rest).solvable) return 0
+  const cnt = countsOf(rest)
+  const live = (): number[] => {
+    const out: number[] = []
+    for (let i = 4; i < cnt.length; i++) if (cnt[i] > 0) out.push(i)
+    return out
+  }
+  const stranded = (): boolean => live().some(i => setsContaining(cnt, i).length === 0)
+  if (stranded()) return 1
+  for (;;) {
+    let forced: LSet | null = null
+    for (const i of live()) {
+      const c = setsContaining(cnt, i)
+      if (c.length === 1) { forced = c[0]; break }
+    }
+    if (!forced) return 3
+    apply(cnt, forced, -1)
+    if (stranded()) return 2
+  }
+}
