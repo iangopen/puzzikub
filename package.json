@@ -10,7 +10,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "verify:mobile": "node scripts/verify-mobile-all.mjs"
+    "verify:mobile": "node scripts/verify-mobile-all.mjs",
+    "verify:library": "node scripts/verify-library.mjs",
+    "verify:live": "node scripts/verify-live.mjs"
   },
   "dependencies": {
     "ogl": "^1.0.11",
