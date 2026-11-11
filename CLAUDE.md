@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: June 2026 — post-Fable audit + open-reasoning session restructure.*
+*Last updated: 2026-11-11 — mobile work merged to main and deployed under the iangopen account.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -808,6 +808,28 @@ src/lib/dragIdentity.verify.ts      29
 ---
 
 ## Current status (update this after each session)
+### Status as of 2026-11-11 — merged and deployed
+- **`main` now contains everything:** m=2 migration, the chain archetype, mobile
+  groundwork, touch drag and the verification rig (`mobile-touch-groundwork` was
+  fast-forwarded into `main`). Both are pushed to `origin`, which is the renamed
+  `iangopen/puzzikub` account.
+- **Deployed:** https://iangopen.github.io/puzzikub/ serves the `main` build.
+  The index and its JS/CSS assets all returned 200.
+- Gate at merge: `npm run build` clean (107 modules), all ten harnesses at their
+  recorded counts (331/0, all seven par numbers EXACT), `verify:mobile` 120/0.
+- **Still open:**
+  - iOS Safari / real-device touch testing has never been done. All touch
+    evidence so far comes from Chrome CDP emulation.
+  - The Library Play bug (`handlePlay` in `App.tsx` discards its argument).
+  - Library and Editor have not been re-verified in a browser since the m=2
+    storage and id changes. Only the `storage` harness covers them.
+  - Parked engine items: COUPLED redesign (`COUPLED_DESIGN.md`), the cut-point
+    L≤10 cap now that the board scales, a par metric for deduction archetypes,
+    and `planValueGroupGoal`'s O(L!) wall.
+- The local `m2-migration` branch is 17 ahead of its origin copy, but every one
+  of those commits is already in `main`. It was left untouched.
+
+*(Historical note below: the m=2 migration has since been merged into `main`.)*
 **The m=2 migration is COMPLETE (Steps 1-12), on branch `m2-migration`, NOT yet
 merged to `main` — merging is a deliberate review decision, not automatic.**
 All ten harnesses green (331 checks, 0 failures), all par numbers exact,
