@@ -596,7 +596,7 @@ export function planMixedGoal(currentGrid: Grid, rack: Tile[], windows: WindowSp
     const idx = new Array(windows.length).fill(0)
     for (;;) {
       const goal = new Map<string, [number, number]>()
-      let ok = true
+      const ok = true
       for (let wi = 0; wi < windows.length && ok; wi++) {
         const row = rowPerm[wi]
         const cs = colOptions[wi][idx[wi]]

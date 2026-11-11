@@ -128,7 +128,6 @@ function migratePuzzle(raw: unknown, stats: MigrationStats): Puzzle | null {
   if (!Array.isArray(p.grid) || !Array.isArray(p.rack)) return null
 
   const used = new Set<string>()
-  let mintedHere = 0
   const before = stats.tilesMinted
 
   // Grid first, row-major, then rack — a fixed scan order is what makes the
@@ -151,7 +150,7 @@ function migratePuzzle(raw: unknown, stats: MigrationStats): Puzzle | null {
     rack.push(resolveTile(t, used, stats))
   }
 
-  mintedHere = stats.tilesMinted - before
+  const mintedHere = stats.tilesMinted - before
   if (mintedHere > 0) stats.puzzlesMigrated++
 
   // Everything except the tiles is carried across untouched.

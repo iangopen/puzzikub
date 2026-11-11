@@ -36,6 +36,18 @@ const CONFETTI_COLORS = ['#A32D2D', '#185FA5', '#BA7517', '#222222']
  */
 const TOUCH_MOUSE_SUPPRESS_MS = 500
 
+/** Small deterministic PRNG (mulberry32) — used for the confetti scatter. */
+function mulberry32(seed: number): () => number {
+  let a = (seed * 0x9e3779b9) >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 /**
  * Resolve a hit-test result to a drop target.
  *
@@ -159,15 +171,18 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
     startDragTouch(e, tile, src)
   }, [drag, setHover, startDragTouch])
 
-  const confettiPieces = useMemo(() => (
-    Array.from({ length: 20 }, (_, i) => ({
+  // Confetti scatter is a PURE function of confettiId (seeded PRNG), so render
+  // stays idempotent while each win still gets a fresh pattern.
+  const confettiPieces = useMemo(() => {
+    const rand = mulberry32(confettiId)
+    return Array.from({ length: 20 }, (_, i) => ({
       id: i,
       color: CONFETTI_COLORS[i % 4],
-      tx: `${(Math.random() - 0.5) * 300}px`,
-      ty: `${100 + Math.random() * 200}px`,
-      delay: `${Math.random() * 0.4}s`,
+      tx: `${(rand() - 0.5) * 300}px`,
+      ty: `${100 + rand() * 200}px`,
+      delay: `${rand() * 0.4}s`,
     }))
-  ), [confettiId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [confettiId])
 
   /**
    * DEV-ONLY: ?forceArchetype=decoy|red-herring|composed|cut-point|
@@ -206,6 +221,10 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
   }, [loadPuzzle, forceType, onSavedPuzzleCleared])
 
   useEffect(() => {
+    // Mount-only initialisation: load the Library's puzzle or generate one. Both
+    // paths set state, which is the point; moving this out of an effect would
+    // change when generation runs (and the generate() path is shared with New).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (savedPuzzle) { loadPuzzle(savedPuzzle); setCurrentPuzzle(savedPuzzle) }
     else generate('easy')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -316,6 +335,9 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
     if (rack.length === 0 && prev > 0) {
       if (won) {
         if (soundEnabled) playWinFanfare()
+        // The win is decided inside the play-state reducer, so reacting to it
+        // here is the only hook point without restructuring drop/win logic.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setShowConfetti(true)
         setConfettiId(id => id + 1)
         setTimeout(() => setShowConfetti(false), 1800)

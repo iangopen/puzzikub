@@ -3,7 +3,7 @@
  * Runs the build, every engine harness, and the browser rigs, in sequence,
  * printing each step's pass/fail line and a summary. Exit 1 if anything fails.
  *
- *   npm run verify        build + 11 harnesses + verify:mobile + verify:library
+ *   npm run verify        build + lint + 11 harnesses + verify:mobile + verify:library
  *   npm run verify:full   the same plus valueGroupPlanner (~6 min)
  *
  * TWO TRAPS this runner exists to get right (both measured the first time):
@@ -54,6 +54,7 @@ const report = r => {
 }
 
 report(await run('build', 'npm run build'))
+report(await run('lint', 'npm run lint'))
 const bg = BACKGROUND.map(h => run(h, `npx tsx src/lib/${h}`))
 for (const h of SEQUENTIAL) report(await run(h, `npx tsx src/lib/${h}`))
 for (const r of await Promise.all(bg)) report(r)
