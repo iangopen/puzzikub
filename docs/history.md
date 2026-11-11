@@ -42,3 +42,10 @@
   timed harnesses, and failures read from summary lines.
 - `npm audit fix` (no --force): 18 → 10 findings; 12 of 13 GitHub alerts fixed.
   minimatch (eslint 10 chain, major bump) is left and documented.
+
+## 2026-11-11 — repo polish (branch `repo-polish`)
+- Real README with screenshots (`scripts/screenshots.mjs`); quick-start proven
+  in a fresh clone.
+- DarkVeil credited after reading the React Bits license (MIT + Commons Clause)
+  and ogl's (Unlicense).
+- Lint 8 → 0 and added to `npm run verify`.

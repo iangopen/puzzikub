@@ -6,7 +6,7 @@ board into new valid sets. Puzzles are generated in the browser and each one
 comes with a par. Puzzikub is an independent fan project and is **not affiliated
 with or endorsed by** the makers of Rummikub.
 
-**Play it: https://iangopen.github.io/puzzikub/**
+**Play it: [iangopen.github.io/puzzikub](https://iangopen.github.io/puzzikub/)**
 
 ![A hard puzzle on desktop](docs/screenshots/desktop.png)
 

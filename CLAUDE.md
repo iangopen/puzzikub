@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — dependency audit: `npm run verify` / `verify:full` added, 12 of 13 Dependabot alerts fixed; merged and deployed.*
+*Last updated: 2026-11-11 — repo polish: real README + screenshots, DarkVeil credited, lint at 0 and part of `npm run verify`; merged and deployed.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -16,7 +16,7 @@ base must always be '/puzzikub/' — never change this, never remove it.
 ## Testing & verification workflow
 ### THE STANDING SAFETY NET — run this, do not list harnesses by hand
 ```
-npm run verify        build + 11 engine harnesses + verify:mobile + verify:library  (~6 min)
+npm run verify        build + lint + 11 engine harnesses + verify:mobile + verify:library  (~6 min)
 npm run verify:full   the same + valueGroupPlanner                                  (~8 min)
 ```
 Run `verify` before AND after any change; run `verify:full` before merging.
@@ -843,6 +843,31 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-11 — repo polish (branch `repo-polish`): merged and deployed
+- **README.md is real**, replacing the Vite template. Every claim was taken from
+  the repo. Its quick-start was run literally in a fresh clone: install, build,
+  `vite preview` → 200 on :4173/puzzikub/, dev → 200 on :5173/puzzikub/. All
+  external links return 200.
+- **Screenshots** in `docs/screenshots/`: desktop 32 KB, phone 60 KB, neon
+  172 KB. Regenerate them with `node scripts/screenshots.mjs`.
+- **DarkVeil is credited.** It comes from React Bits (David Haz) under
+  **MIT + Commons Clause**: use as part of an app or website is allowed,
+  including commercially; selling or redistributing the component itself is
+  not. A free public game is the permitted case. The required notice is at the top of
+  `DarkVeil.tsx`, the README has a Credits section, and Settings shows "Animated
+  veil: DarkVeil by React Bits" under Background (checked in a browser). `ogl`
+  is the Unlicense (text in its shipped README; the GitHub repo has no LICENSE file).
+- **`npm run lint` went from 8 errors to 0, and lint is now a step of `npm run verify`.**
+  Fixes: dropped DarkVeil's `@ts-nocheck` (it hid only an untyped canvas ref);
+  prefer-const in `mixedGoalPlanner.ts`; a useless assignment in `storage.ts`;
+  confetti uses a PRNG seeded from `confettiId`, so render is pure. **Two scoped
+  `set-state-in-effect` disables, each with a reason, in PlayScreen:** the
+  mount-time load/generate and the win reaction. The drag and touch effect
+  dependency arrays were NOT touched.
+- **There is no LICENSE file.** The repo is public but not open-source licensed
+  until Ian picks a license.
+- Gate: `npm run verify` 15/15, including lint.
+
 ### 2026-11-11 — dependency audit (branch `deps-audit`): merged and deployed
 - `npm audit fix` (never `--force`) took only patch and minor bumps, lockfile
   only, so `package.json` ranges are unchanged. Vite 8.0.16 → 8.3.8, postcss
@@ -863,9 +888,8 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 - Bundle: JS 328.99 → 328.76 kB (gzip 102.45 → 102.39), CSS unchanged at
   2.19 kB. `base` is still `/puzzikub/`.
 - `npm run verify` 14/14 before and after; `verify:full` 15/15 after.
-- **Pre-existing, not caused by this:** `npm run lint` reports 8 errors with
-  both the old and new eslint (measured by reinstalling the old lockfile). Lint
-  is not part of the gate. Fixing it is a separate code change.
+- *(The 8 pre-existing lint errors noted here were fixed in the repo-polish
+  session below.)*
 
 ### 2026-11-11 — Library Play + Editor: fixed, verified, merged, deployed
 - **Library Play works.** `App` keeps `savedPuzzle`. `handlePlay` sets it, and
