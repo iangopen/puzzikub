@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — main merged and deployed; branches `generator-audit` and `trap-variety` pushed, unmerged (see Current status).*
+*Last updated: 2026-11-11 — `generator-audit` and `trap-variety` merged into `main` (fast-forward) and deployed.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -825,7 +825,24 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
-### Branch `trap-variety` (2026-11-11, off `generator-audit`) — pushed, NOT merged, NOT deployed
+### 2026-11-11 — `generator-audit` + `trap-variety` MERGED into `main` and DEPLOYED
+- `main` was fast-forwarded 81715a7 → 40213ca → ff175ef (no conflicts) and pushed.
+  The two branch sections below now describe what `main` ships. The branches
+  were left in place. No `library-play-fix` branch exists locally or on origin.
+- Gate on `main`: `npm run build` clean; twelve harnesses 478/0 (verifyEngine 53
+  + invariants (a)-(d), decoy 23, redherring 25, composed 32, cutpoint 36, chain
+  28, mixedGoalPlanner 37, pairingMin 31, storage 37, dragIdentity 29,
+  trapVariants 118, valueGroupPlanner 29); `verify:mobile` 42/24/54.
+- Live: index, JS and CSS all return 200, and the hashes match local `dist/`
+  (`index-ZVJv3XFh.js`, `index-Cqk8mWV_.css`). The CDP rig loaded the live site:
+  easy rendered with par 11 and rack 2; extreme rendered as 10×10 with par 23 and rack 5.
+- **Still open:** iOS Safari / real-device touch testing; the Library Play bug
+  (`handlePlay` discards its argument; no fix branch exists); groups-to-runs
+  has multiple solutions (2/16/81); red herring at hard is still technique L1;
+  the deduction-chain-plus-trap layer; COUPLED blocks redesign; medium
+  calibration. Nothing on the new variants has been played by anyone but Ian locally.
+
+### Branch `trap-variety` (2026-11-11, off `generator-audit`) — MERGED + deployed 2026-11-11
 Variety and difficulty changes: play this branch before merging. Numbers and
 method are in **`GENERATOR_AUDIT.md` §7**.
 
@@ -869,7 +886,7 @@ rest of `GENERATOR_AUDIT.md` §5 (a deduction-chain-plus-trap layer, groups-to-
 runs having 2/16/81 solutions, medium calibration). Nothing here has been
 played by a person.
 
-### Branch `generator-audit` (2026-11-11) — pushed, NOT merged, NOT deployed
+### Branch `generator-audit` (2026-11-11) — MERGED + deployed 2026-11-11
 Difficulty changes are a feel judgement: play this branch before merging it.
 Full numbers, method and the ranked open leads are in **`GENERATOR_AUDIT.md`**.
 
