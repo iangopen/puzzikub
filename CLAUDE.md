@@ -4,7 +4,7 @@
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
 Stack: Vite + React + TypeScript, deployed to GitHub Pages.
-Repo: https://github.com/iangopenbusinessai-lab/puzzikub.git
+Repo: https://github.com/iangopen/puzzikub.git
 
 ---
 
@@ -15,7 +15,7 @@ base must always be '/puzzikub/' — never change this, never remove it.
 
 ## Testing & verification workflow
 - Local dev: `npm run dev` → http://localhost:5173/puzzikub/
-- Live site: https://iangopenbusinessai-lab.github.io/puzzikub/
+- Live site: https://iangopen.github.io/puzzikub/
 - Deploy: `npm run deploy` (builds + pushes dist/ to gh-pages branch)
   Changes are NOT live until this runs, even after `git push` to main.
 - Correct order: git add/commit/push FIRST, then npm run deploy.
