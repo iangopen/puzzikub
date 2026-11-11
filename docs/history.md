@@ -24,3 +24,13 @@
 - Added 30 exhaustive comparisons each at L=7 and L=8 for the group planner,
   and rejection-rate reporting to the retrying harnesses and the audit.
 - Not merged, not deployed.
+
+## 2026-11-11 — merge + deploy, then Library Play fix (branch `library-play-fix`)
+- Fast-forwarded `generator-audit` and `trap-variety` into `main` and deployed.
+- Wired Library Play through `App` into `PlayScreen` (`savedPuzzle` prop). Par is
+  hidden for hand-built puzzles. Added `data-tile-id` test hooks.
+- New committed rigs: `verify:library` (37, mutation-tested) and `verify:live` (14).
+- First `verify:library` run had 8 failures, all test bugs: Undo keeps `moves`
+  by design; the NavBar's bold button was read as the pill; the rack "+" matched
+  "+ add row"; generated extreme puzzles can coincide, so F was re-anchored on
+  the hand-built puzzle.

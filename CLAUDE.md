@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — `generator-audit` and `trap-variety` merged into `main` (fast-forward) and deployed.*
+*Last updated: 2026-11-11 — Library Play fixed, Library + Editor verified in a browser (`verify:library`), `verify:live` committed; merged and deployed.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -282,13 +282,8 @@ reasoning DEPTH, not move count — par understates it badly. Grid is 10×6, wel
 inside the `Board.tsx` width limit.
 
 ### 5. Open items
-- **🐞 Library "Play" button is still BROKEN** (detailed note in
-  `MIGRATION_M2_LOG.md`, Step 9).
-  `App.tsx`'s `handlePlay(_puzzle)` discards its argument, so clicking Play on a
-  saved puzzle shows a freshly generated one. **Deliberately still unfixed** —
-  it is a real feature change (threading a puzzle into `PlayScreen`), its own
-  session. It does NOT block playtesting: fresh puzzles and
-  `?forceArchetype=` reach every archetype without touching Library.
+- *(FIXED 2026-11-11: the Library Play button — see "Library Play + Editor" under
+  Current status.)*
 - A responsive `Board.tsx` is the one straightforward future win — it would
   unlock cut-point at L=13 / par 16.
 - COUPLED still needs its contested-resource redesign (`COUPLED_DESIGN.md`).
@@ -673,7 +668,7 @@ was rebuilt and committed (next section); its numbers replace that one.*
   momentum-scroll interaction with the pan container.
 - A responsive `Board.tsx` is now partly addressed — scale + scroll make L=13
   viable, though the cut-point L≤10 cap in `archetypes.ts` was NOT changed.
-- The Library **Play** button bug is still open and still unrelated.
+- *(The Library Play bug was fixed 2026-11-11.)*
 
 
 ---
@@ -793,6 +788,13 @@ src/lib/difficultyProxy.ts   non-par difficulty proxies (solution count, techniq
 src/lib/generatorAudit.ts    `npx tsx src/lib/generatorAudit.ts 200 [filter]` —
                              the tables in GENERATOR_AUDIT.md (~10 min unfiltered)
 ```
+**Library/Editor browser checks — `npm run verify:library`** (37 checks,
+`scripts/verify-library.mjs`; re-run after any change to App, PlayScreen,
+LibraryScreen, EditorScreen, useEditor, usePlayState or storage).
+**Deployed-site smoke test — `npm run verify:live [url]`** (14 checks,
+`scripts/verify-live.mjs`, default URL = the live site). Run it after every
+`npm run deploy`. It is committed on purpose: two sessions lost a throwaway version.
+
 **Browser checks — `npm run verify:mobile` (120 checks: mobile 42, wide 24,
 touch 54). Re-run after ANY change to Board/Rack/DragPreview/TileFace/useDrag/
 PlayScreen/App or index.css.** See "THE BROWSER VERIFICATION RIG".
@@ -825,6 +827,46 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-11 — Library Play + Editor: fixed, verified, merged, deployed
+- **Library Play works.** `App` keeps `savedPuzzle`. `handlePlay` sets it, and
+  `PlayScreen`'s optional `savedPuzzle` prop is loaded on mount through the
+  existing `loadPuzzle`, instead of generating. The prop beats `?forceArchetype`.
+  Anything that generates (New, a difficulty pill, Try again) calls
+  `onSavedPuzzleCleared`, and every NavBar nav clears it too, so the Play tab
+  still means "a fresh puzzle". The difficulty pill starts on the saved puzzle's diff.
+- **Par is hidden for non-generated puzzles.** The editor stores
+  `optimalMoves = rack.length` and the seed puzzles store hand-typed numbers.
+  Those are lower bounds, not a constructed par, so `par` shows "—" and the win
+  message never says "perfect!" unless `puzzle.generated` is true.
+- `Board`/`Rack` tiles carry `data-tile-id` (a test hook only) so the rig can
+  compare on-screen ids with the stored blob.
+- **`npm run verify:library`: 37 passed, 0 failed.** It covers: a legacy
+  id-less blob gets deterministic ids (copy 0 and 1), plays to a win, and Undo
+  and Reset restore its own start; Generate adds Easy/Medium/Hard/Extreme;
+  Play matches stored grid and rack ids exactly, plus par and pill;
+  `?forceArchetype` loses to a saved puzzle; New, a pill or NavBar Play after
+  a Library Play generate; in the Editor, build, third copy refused with the
+  message, Save adds the puzzle to the Library and it plays with its own ids;
+  survives reload; Delete. **Mutation-tested:** with `handlePlay` ignoring its
+  puzzle again, it fails 18 checks and exits 1.
+- **`npm run verify:live`** passed 14/0 against the deployed site.
+- Gate: `npm run build` clean; twelve harnesses 478/0; `verify:mobile` 42/24/54.
+- The prompt's belief was wrong: the Library Generate row DOES offer Extreme
+  (`DIFFS` has all four). Verified in the browser.
+- **Library/Editor items NOT fixed (bigger than this session):**
+  - Every generated library puzzle is named `"<diff> puzzle"`, so rows are
+    indistinguishable. A name scheme, or showing par or archetype, is a UI choice.
+  - The Editor's Save does not check that the puzzle is valid or solvable
+    (`validateGrid` on the board, `solveBagM2` on the bag). An unwinnable
+    hand-built puzzle saves silently.
+  - Removing an Editor row or column that holds tiles uses `window.confirm`.
+    That is untested by the rig, because CDP dialogs block it.
+  - Seed puzzles (`storage.ts`) are a rack on an empty 6×10 board. They play,
+    but they are effectively "place the runs" puzzles.
+- **Still open overall:** iOS Safari / real-device touch testing; groups-to-runs
+  multiple solutions; red herring at hard still technique L1; the
+  deduction-chain-plus-trap layer; COUPLED redesign; medium calibration.
+
 ### 2026-11-11 — `generator-audit` + `trap-variety` MERGED into `main` and DEPLOYED
 - `main` was fast-forwarded 81715a7 → 40213ca → ff175ef (no conflicts) and pushed.
   The two branch sections below now describe what `main` ships. The branches
@@ -836,8 +878,7 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 - Live: index, JS and CSS all return 200, and the hashes match local `dist/`
   (`index-ZVJv3XFh.js`, `index-Cqk8mWV_.css`). The CDP rig loaded the live site:
   easy rendered with par 11 and rack 2; extreme rendered as 10×10 with par 23 and rack 5.
-- **Still open:** iOS Safari / real-device touch testing; the Library Play bug
-  (`handlePlay` discards its argument; no fix branch exists); groups-to-runs
+- **Still open:** iOS Safari / real-device touch testing; groups-to-runs
   has multiple solutions (2/16/81); red herring at hard is still technique L1;
   the deduction-chain-plus-trap layer; COUPLED blocks redesign; medium
   calibration. Nothing on the new variants has been played by anyone but Ian locally.
@@ -927,9 +968,7 @@ proxies are structural and have not been checked against a human solver.
 - **Still open:**
   - iOS Safari / real-device touch testing has never been done. All touch
     evidence so far comes from Chrome CDP emulation.
-  - The Library Play bug (`handlePlay` in `App.tsx` discards its argument).
-  - Library and Editor have not been re-verified in a browser since the m=2
-    storage and id changes. Only the `storage` harness covers them.
+  - *(Library and Editor were re-verified in a browser 2026-11-11: `verify:library`.)*
   - Parked engine items: COUPLED redesign (`COUPLED_DESIGN.md`), the cut-point
     L≤10 cap now that the board scales, a par metric for deduction archetypes,
     and `planValueGroupGoal`'s O(L!) wall.
@@ -955,9 +994,7 @@ goal, so `fixed` is high. Their difficulty is reasoning, not move count. If par
 ever needs to represent them better, that is a difficulty-metric change, not a
 construction bug.
 
-Known open, deliberately: the Library **Play** button (`App.tsx` `handlePlay`
-discards its argument) — does not block playtesting, since `?forceArchetype=`
-and fresh generation reach every archetype.
+*(The Library Play button bug noted here was fixed 2026-11-11.)*
 
 **The move model — do not re-derive.** usePlayState's DROP reducer,
 GRID→GRID branch, drops a grid tile onto an OCCUPIED cell by SWAPPING
