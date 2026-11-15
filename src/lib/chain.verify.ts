@@ -182,12 +182,12 @@ function parOverAllLayouts(b: ChainBuild): number {
 console.log('=== CHAIN archetype verification (deductive chain, m=1) ===\n')
 
 // ---------------------------------------------------------------------------
-console.log('0. Tier gating — chain puzzles ship at MEDIUM only')
-check('buildChain(easy) === null', buildChain('easy') === null)
+console.log('0. Tier gating — chain puzzles ship at EASY only (moved from medium: par 9, technique L0)')
+check('buildChain(medium) === null', buildChain('medium') === null)
 check('buildChain(hard) === null', buildChain('hard') === null)
 check('buildChain(extreme) === null', buildChain('extreme') === null)
-check('buildChain(medium) builds', buildChain('medium') !== null)
-console.log(`   easy=${buildChain('easy')} hard=${buildChain('hard')} extreme=${buildChain('extreme')}`)
+check('buildChain(easy) builds', buildChain('easy') !== null)
+console.log(`   medium=${buildChain('medium')} hard=${buildChain('hard')} extreme=${buildChain('extreme')}`)
 console.log(`   buildChainAt(1)=${buildChainAt(1)}  buildChainAt(5)=${buildChainAt(5)}  (links must be 2..4)\n`)
 
 // ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ console.log(`1. Invariants over ${N} medium builds (a,b,c,d,e + UNIQUE, DEPTH, G
   const pars = new Set<number>(); const dims = new Set<string>(); const depths = new Set<number>(); const gens = new Set<number>()
   let built = 0, example = ''
   for (let i = 0; i < N; i++) {
-    const b = buildChain('medium'); if (!b) continue
+    const b = buildChain('easy'); if (!b) continue
     built++
     const a = validateGrid(b.grid) && getInvalidCells(b.grid).size === 0
     const bi = solveBagM2(b.allTiles).solvable === true
@@ -300,7 +300,7 @@ console.log('\n4. BASELINE — the other archetypes are not chains')
     ['decoy(hard)', () => buildDecoy('hard')],
     ['composed(hard)', () => buildComposed('hard')],
     ['cut-point(medium)', () => buildCutPoint('medium')],
-    ['chain(medium)', () => buildChain('medium')],
+    ['chain(easy)', () => buildChain('easy')],
   ]
   for (const [name, f] of rows) {
     const ds: string[] = []
@@ -319,7 +319,7 @@ console.log('\n5. PAR honesty — builder par vs min over EVERY layout, and a re
 {
   let exact = 0, simExact = 0, simWon = 0, n = 0
   for (let i = 0; i < 6; i++) {
-    const b = buildChain('medium'); if (!b) continue
+    const b = buildChain('easy'); if (!b) continue
     n++
     const ex = parOverAllLayouts(b)
     const sim = simulate(b.grid, b.rack, b.goal)
@@ -337,9 +337,9 @@ console.log('\n5. PAR honesty — builder par vs min over EVERY layout, and a re
 console.log('\n6. Construction timing')
 {
   const times: number[] = []
-  for (let i = 0; i < 12; i++) { const t0 = performance.now(); buildChain('medium'); times.push(performance.now() - t0) }
+  for (let i = 0; i < 12; i++) { const t0 = performance.now(); buildChain('easy'); times.push(performance.now() - t0) }
   const avg = times.reduce((a, b) => a + b, 0) / times.length
-  console.log(`   medium: builds=${times.length} avg=${avg.toFixed(2)}ms min=${Math.min(...times).toFixed(2)}ms max=${Math.max(...times).toFixed(2)}ms`)
+  console.log(`   easy: builds=${times.length} avg=${avg.toFixed(2)}ms min=${Math.min(...times).toFixed(2)}ms max=${Math.max(...times).toFixed(2)}ms`)
   check('construction stays under budget (<250ms)', avg < 250)
 }
 
@@ -350,23 +350,25 @@ console.log('\n7. generatePuzzle integration')
   let chain = 0, valid = 0
   const others = new Map<string, number>()
   for (let i = 0; i < M; i++) {
-    const p = generatePuzzle('medium'); if (!p) continue
+    const p = generatePuzzle('easy'); if (!p) continue
     if (p.archetypeId === 'chain') {
       chain++
       const all = [...p.grid.flat().filter((t): t is Tile => t !== null), ...p.rack]
       if (validateGrid(p.grid) && solveBagM2(all).solvable && p.optimalMoves > 0) valid++
     } else others.set(p.archetypeId ?? '?', (others.get(p.archetypeId ?? '?') ?? 0) + 1)
   }
-  console.log(`   medium: chain=${chain}/${M} (${Math.round(chain / M * 100)}%) valid=${valid}/${chain}; others=${[...others].map(([k, v]) => `${k}:${v}`).join(' ')}`)
-  check('chain puzzles are emitted at medium', chain > 0)
+  console.log(`   easy: chain=${chain}/${M} (${Math.round(chain / M * 100)}%) valid=${valid}/${chain}; others=${[...others].map(([k, v]) => `${k}:${v}`).join(' ')}`)
+  check('chain puzzles are emitted at easy', chain > 0)
   check('every emitted chain puzzle is valid+solvable', valid === chain)
-  check('cut-point still emitted at medium (bands stay disjoint)', (others.get('cut-point') ?? 0) > 0)
-  check('base archetypes still emitted at medium', (others.get('runs-to-groups') ?? 0) + (others.get('groups-to-runs') ?? 0) > 0)
+  let cutAtMedium = 0
+  for (let i = 0; i < 100; i++) if (generatePuzzle('medium')?.archetypeId === 'cut-point') cutAtMedium++
+  check('cut-point still emitted at medium', cutAtMedium > 0)
+  check('base archetypes still emitted at easy', (others.get('runs-to-groups') ?? 0) + (others.get('groups-to-runs') ?? 0) > 0)
   let leaked = 0
-  for (const d of ['easy', 'hard', 'extreme'] as const)
+  for (const d of ['medium', 'hard', 'extreme'] as const)
     for (let i = 0; i < 60; i++) if (generatePuzzle(d)?.archetypeId === 'chain') leaked++
-  console.log(`   chain puzzles leaked into easy/hard/extreme: ${leaked}`)
-  check('chain never appears outside medium', leaked === 0)
+  console.log(`   chain puzzles leaked into medium/hard/extreme: ${leaked}`)
+  check('chain never appears outside easy', leaked === 0)
 }
 
 console.log(`\n=== SELF-CHECKS: ${pass} passed, ${fail} failed ===`)

@@ -277,7 +277,7 @@ for (const mirror of [false, true]) {
   const v = fresh()
   let built = 0, depth8 = 0
   for (let i = 0; i < 10; i++) {
-    const b = buildChainVariant('medium', x => x.mirror === mirror)
+    const b = buildChainVariant('easy', x => x.mirror === mirror)
     if (!b) continue
     built++
     verify(b, [], v)
@@ -335,7 +335,7 @@ const rows: [string, () => ArchetypeResult | null, number][] = [
   ['red-herring / extreme', () => buildRedHerringVariant('extreme'), 25],
   ['composed / hard', () => buildComposedVariant('hard'), 18],
   ['composed / extreme', () => buildComposedVariant('extreme'), 25],
-  ['chain / medium', () => buildChainVariant('medium'), 15],
+  ['chain / easy', () => buildChainVariant('easy'), 15],
 ]
 for (const [label, build, target] of rows) {
   const sigs = new Set<string>()
@@ -360,18 +360,21 @@ for (const [label, build, target] of rows) {
 console.log('\n=== 7. force types resolve to the right layer ===')
 const EXPECT: Partial<Record<ForceType, [string, Difficulty[]]>> = {
   'decoy-classic': ['runs-to-groups-decoy', DIFFS], 'decoy-mirror': ['runs-to-groups-decoy', DIFFS],
-  'red-herring-classic': ['runs-to-groups-redherring', DIFFS], 'red-herring-split': ['runs-to-groups-redherring', DIFFS],
+  // classic at extreme is L=6 / par 24: inside the HARD band, so the generator's
+  // tier gate refuses it there. It was already unshipped at extreme (L=7/8 only).
+  'red-herring-classic': ['runs-to-groups-redherring', ['hard']], 'red-herring-split': ['runs-to-groups-redherring', DIFFS],
   'composed-classic': ['runs-to-groups-composed', DIFFS], 'composed-mirror': ['runs-to-groups-composed', DIFFS],
   'composed-third': ['runs-to-groups-composed', DIFFS],
-  'chain-classic': ['chain', ['medium']], 'chain-mirror': ['chain', ['medium']],
+  'chain-classic': ['chain', ['easy']], 'chain-mirror': ['chain', ['easy']],
 }
 for (const force of FORCE_TYPES) {
   const e = EXPECT[force]
   if (!e) continue
   const got = e[1].map(d => generatePuzzle(d, force)?.archetypeId ?? 'null')
-  const offTier = generatePuzzle('easy', force)
-  console.log(`  ?forceArchetype=${force.padEnd(20)} ${e[1].join('/')} -> ${got.join(', ')}   easy -> ${offTier ? 'BUILT' : 'null'}`)
-  check(`${force}: builds its layer at its tiers and nothing at easy`, got.every(g => g === e[0]) && offTier === null)
+  const off: Difficulty = e[1].includes('easy') ? 'medium' : 'easy'
+  const offTier = generatePuzzle(off, force)
+  console.log(`  ?forceArchetype=${force.padEnd(20)} ${e[1].join('/')} -> ${got.join(', ')}   ${off} -> ${offTier ? 'BUILT' : 'null'}`)
+  check(`${force}: builds its layer at its tiers and nothing off-tier`, got.every(g => g === e[0]) && offTier === null)
 }
 
 // ===========================================================================
@@ -392,7 +395,7 @@ five('red herring, split across two colours, hard', () => buildRedHerringVariant
 five('red herring with middle filler (L=7/8), extreme', () => buildRedHerringVariant('extreme'))
 five('composed, mirrored, hard', () => buildComposedVariant('hard', v => v.mirror && !v.lowOnClean))
 five('composed, opposite-end extender on the third colour, extreme', () => buildComposedVariant('extreme', v => v.lowOnClean))
-five('chain, mirrored with shuffled rows, medium', () => buildChainVariant('medium', v => v.mirror))
+five('chain, mirrored with shuffled rows, easy', () => buildChainVariant('easy', v => v.mirror))
 
 console.log(`\n=== SELF-CHECKS: ${pass} passed, ${fail} failed ===`)
 if (fail > 0) process.exit(1)

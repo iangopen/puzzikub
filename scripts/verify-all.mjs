@@ -3,7 +3,7 @@
  * Runs the build, every engine harness, and the browser rigs, in sequence,
  * printing each step's pass/fail line and a summary. Exit 1 if anything fails.
  *
- *   npm run verify        build + lint + 11 harnesses + verify:mobile + verify:library
+ *   npm run verify        build + lint + 12 harnesses + verify:mobile + verify:library
  *   npm run verify:full   the same plus valueGroupPlanner (~6 min)
  *
  * TWO TRAPS this runner exists to get right (both measured the first time):
@@ -22,7 +22,7 @@ const SEQUENTIAL = [
   'verifyEngine.ts', // NOT *.verify.ts — easy to miss in a glob
   'decoy.verify.ts', 'redherring.verify.ts', 'composed.verify.ts', 'cutpoint.verify.ts',
   'chain.verify.ts', 'mixedGoalPlanner.verify.ts', 'storage.verify.ts',
-  'dragIdentity.verify.ts', 'trapVariants.verify.ts',
+  'dragIdentity.verify.ts', 'trapVariants.verify.ts', 'uniqueness.verify.ts',
 ]
 const BACKGROUND = ['pairingMin.verify.ts', ...(full ? ['valueGroupPlanner.verify.ts'] : [])]
 

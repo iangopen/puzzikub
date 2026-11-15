@@ -50,7 +50,9 @@ for (const [L, rack, n] of [[3, 1, 40], [4, 2, 40], [5, 2, 40], [6, 4, 30], [7, 
 }
 
 console.log('\n=== 1b. the SHIPPED large sizes: L=7 (hard) and L=8 (extreme), 30 builder boards each ===')
-// Extreme ships at L=8, so equivalence matters most exactly here. The exhaustive
+// Extreme now ships at L=9, where the exhaustive planner (9! orders) is too slow
+// to run here: L=8 is the largest size compared directly, and section 3 replays
+// the L=9 plans through the reducer. The exhaustive
 // planner costs ~1 s (L=7) and ~10 s (L=8) per board, which is why this section
 // dominates the harness's run time (several minutes).
 let bigCompared = 0, bigMismatch = 0
@@ -120,8 +122,9 @@ check('scrambled boards really exercise fixed tiles / cycles', withFixedOrCycle 
 check('scrambled boards cover more than 3 occupied rows', [...occupiedRowHist.keys()].some(k => k > 3))
 
 console.log('\n=== 3. builder plans replay through the reducer ===')
-// Pinned pars. extreme is 23 since the generator-audit recalibration (L=8).
-const PAR = { easy: 11, medium: 16, hard: 20, extreme: 23 } as const
+// Pinned pars. extreme is 26 since the uniqueness/tier session (L=9); it was 23
+// (L=8), which is inside the hard par band.
+const PAR = { easy: 11, medium: 16, hard: 20, extreme: 26 } as const
 for (const diff of ['easy', 'medium', 'hard', 'extreme'] as const) {
   let ok = 0
   const pars = new Set<number>()

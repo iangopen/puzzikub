@@ -67,7 +67,8 @@ export class Checks {
  * and NO board renders until the right pill is clicked.
  */
 export async function openPlay(page, baseUrl, { scale, query = '', diff, extraStorage = {} } = {}) {
-  await page.navigate(baseUrl + query)
+  // RIG_QUERY=?forceArchetype=chain reproduces a rig run on one archetype.
+  await page.navigate(baseUrl + (query || process.env.RIG_QUERY || ''))
   // ***Wait for the app to MOUNT before seeding storage.*** React commits and
   // runs mount effects AFTER the load event, and App's mount effect writes the
   // board scale it read at startup back to localStorage. Seeding on load alone
@@ -89,6 +90,24 @@ export async function openPlay(page, baseUrl, { scale, query = '', diff, extraSt
     await clickButton(page, diff)
   }
   await waitForBoard(page)
+  // A random puzzle can be one whose rack starts below the fold: the chain
+  // archetype (20% of EASY since the uniqueness/tier session) has a 10-row board,
+  // which on a phone viewport pushes the rack off screen, so a touch aimed at a
+  // rack tile lands on <html>. Measured: forcing chain fails 12 touch checks.
+  // The drag rigs need the rack on screen, so a random puzzle is redrawn until
+  // it is. Explicit queries (forced archetypes) are never redrawn.
+  if (!query && !process.env.RIG_QUERY) {
+    for (let i = 0; i < 12; i++) {
+      const onScreen = await page.eval(() => {
+        const r = document.querySelector('[data-rack]')?.getBoundingClientRect()
+        return !!r && r.bottom <= window.innerHeight
+      })
+      if (onScreen) break
+      await page.reload()
+      if (diff) await clickButton(page, diff)
+      await waitForBoard(page)
+    }
+  }
   await page.takeRecord()
 }
 
