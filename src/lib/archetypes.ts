@@ -727,7 +727,12 @@ interface Params { L: number; rackSize: number }
 function paramsFor(diff: Difficulty): Params {
   switch (diff) {
     case 'easy': return { L: 3, rackSize: 2 }
-    case 'medium': return { L: 4, rackSize: 3 }
+    // rackSize 4, not 3 (uniqueness/tier session). With three boundary tiles one
+    // colour has none, and EVERY such bag has a second solution: that colour's
+    // top (or bottom) value joins a group with the two colours whose runs stop
+    // short of it. Measured 2 distinct solutions on 200/200. A boundary tile on
+    // all four colours forces all four runs: 1 solution on 200/200, par 12-16.
+    case 'medium': return { L: 4, rackSize: 4 }
     case 'hard': return { L: 5, rackSize: 4 }
     case 'extreme': return { L: 6, rackSize: 4 }
   }
@@ -899,7 +904,10 @@ function runsToGroupsParamsFor(diff: Difficulty): Params {
     // With the occupied-row planner L=8 builds in ~0.1s, so extreme is its own
     // tier again. rackSize 5 (par 23), not 6 (par 24): six offsets out of eight
     // admit a single no-three-consecutive pattern, i.e. one board shape.
-    case 'extreme': return { L: 8, rackSize: 5 } // par 23  (groups-to-runs extreme: 24-25 typical)
+    // RECALIBRATED AGAIN (uniqueness/tier session): L=8 gave par 23, inside the
+    // HARD par band (17-24), so "extreme" runs-to-groups rated as hard. L=9 /
+    // rack 5 is par 26 (= 3L + rack - 6), 11x11 grid, ~80 ms a build.
+    case 'extreme': return { L: 9, rackSize: 5 } // par 26
   }
 }
 
@@ -1813,7 +1821,8 @@ function composedCore(L: number, variantIn?: ComposedVariant): Proved<ComposedBu
  * deepest the 13-value range allows (hinges 3 apart, last hinge ≤ 13). */
 function chainParamsFor(diff: Difficulty): { links: number } | null {
   switch (diff) {
-    case 'medium': return { links: 4 }
+    // EASY since the uniqueness/tier session (was medium): par 9, technique L0.
+    case 'easy': return { links: 4 }
     default: return null
   }
 }

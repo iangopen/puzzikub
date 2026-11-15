@@ -3,6 +3,7 @@ import {
   buildChain, buildChainVariant, buildComposed, buildComposedVariant, buildCutPoint, buildDecoy, buildDecoyVariant,
   buildRedHerring, buildRedHerringVariant, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType, type ArchetypeResult,
 } from './archetypes'
+import { shipVerdict } from './tierBands'
 
 const BUILDERS: Record<ArchetypeType, (diff: Difficulty) => ReturnType<typeof buildGroupsToRuns>> = {
   'groups-to-runs': buildGroupsToRuns,
@@ -43,21 +44,26 @@ const REDHERRING_PROB: Partial<Record<Difficulty, number>> = { hard: 0.08, extre
 const CUTPOINT_PROB: Partial<Record<Difficulty, number>> = { medium: 0.25 }
 
 /**
- * The chain layer — MEDIUM ONLY, and sharing ONE roll with the cut-point band
- * below so the two medium-only layers stay disjoint (at most one per puzzle).
+ * The chain layer — EASY ONLY since the uniqueness/tier session (it was medium
+ * only). Its par is 9 and every one of its eight steps is a forced single
+ * (technique level 0), so in medium it sat below the whole easy tier on both
+ * measures. It is the same roll as the cut-point band; the two layers are in
+ * different tiers, so at most one can apply to a puzzle.
  *
  * Like cut-point it is a deduction puzzle rather than a trap puzzle: the board
  * is a set of already-valid rows, and the work is figuring out the unique
  * partition, which can only be deduced in sequence (see buildChainAt).
  */
-const CHAIN_PROB: Partial<Record<Difficulty, number>> = { medium: 0.20 }
+const CHAIN_PROB: Partial<Record<Difficulty, number>> = { easy: 0.20 }
 
 /**
  * Builder calls made and builder calls that returned null, across every retry
  * loop below. Read (and reset) by the audit and the harnesses: a retry loop hides
  * a builder that has started rejecting most of its draws, this does not.
+ * `notUnique` and `outOfBand` are the two reasons `shipVerdict` gives; the rest
+ * of `rejected` is builders returning null.
  */
-export const generationStats = { attempts: 0, rejected: 0 }
+export const generationStats = { attempts: 0, rejected: 0, notUnique: 0, outOfBand: 0 }
 
 /**
  * DEV-ONLY escape hatch for playtesting a specific variant. Not reachable from
@@ -135,8 +141,8 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
     }
   }
 
-  // The two medium-only deduction layers share ONE roll, so they are disjoint
-  // and at most one can apply to a puzzle.
+  // The two deduction layers (cut-point at medium, chain at easy) share ONE
+  // roll, so at most one can apply to a puzzle.
   const cutPointP = CUTPOINT_PROB[diff] ?? 0
   const chainP = CHAIN_PROB[diff] ?? 0
   if (cutPointP + chainP > 0) {
@@ -169,15 +175,30 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
   return generateArchetype(first, diff) ?? generateArchetype(second, diff)
 }
 
-/** Chain puzzles: the board is a set of already-valid rows whose unique
- * partition can only be deduced in sequence. Same hidden-tag convention as the
- * other layers — nothing player-facing names the mechanic or the chain order. */
 type TrapBuilder = (diff: Difficulty) => ArchetypeResult | null
-function generateChain(diff: Difficulty, build: TrapBuilder = buildChainVariant): Puzzle | null {
+
+/**
+ * THE ONE RETRY LOOP every archetype goes through. A build is shipped only if
+ * `shipVerdict` passes it: its bag has exactly one distinct solution (proved by
+ * an exhaustive search that stops at the second, never sampled) and its par is
+ * inside the tier's band (tierBands.ts). Anything else is counted and redrawn.
+ *
+ * `archetypeId` is the hidden internal tag; nothing player-facing reads it.
+ * Exported so the harness can feed it a builder that returns a known
+ * two-solution puzzle and watch it get refused (uniqueness.verify.ts).
+ */
+export function generateWith(diff: Difficulty, archetypeId: string, build: TrapBuilder): Puzzle | null {
   for (let i = 0; i < 40; i++) {
     const result = build(diff)
     generationStats.attempts++
     if (!result) { generationStats.rejected++; continue }
+    const verdict = shipVerdict(diff, result.allTiles, result.minMoves)
+    if (verdict !== 'ok') {
+      generationStats.rejected++
+      if (verdict === 'not-unique') generationStats.notUnique++
+      else generationStats.outOfBand++
+      continue
+    }
     return {
       id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: `${diff} puzzle`,
@@ -186,114 +207,29 @@ function generateChain(diff: Difficulty, build: TrapBuilder = buildChainVariant)
       rack: result.rack,
       optimalMoves: result.minMoves,
       generated: true,
-      archetypeId: 'chain',
+      archetypeId,
     }
   }
   return null
 }
 
-/** Cut-point puzzles (m=2 Step 11): duplicate second copies force an
- * already-valid run to be cut apart. Same hidden-tag convention as the trap
- * layers — nothing player-facing reveals that duplicates are the mechanic, or
- * where the cut points are. */
-function generateCutPoint(diff: Difficulty): Puzzle | null {
-  for (let i = 0; i < 40; i++) {
-    const result = buildCutPoint(diff)
-    generationStats.attempts++
-    if (!result) { generationStats.rejected++; continue }
-    return {
-      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${diff} puzzle`,
-      diff,
-      grid: result.grid,
-      rack: result.rack,
-      optimalMoves: result.minMoves,
-      generated: true,
-      archetypeId: 'cut-point',
-    }
-  }
-  return null
-}
+/** Chain puzzles: already-valid rows whose unique partition is deduced in sequence. */
+const generateChain = (diff: Difficulty, build: TrapBuilder = buildChainVariant): Puzzle | null =>
+  generateWith(diff, 'chain', build)
 
-/** Composed puzzles (decoy + red herring on one board), same hidden-tag
- * convention as the single-trap layers. */
-function generateComposed(diff: Difficulty, build: TrapBuilder = buildComposedVariant): Puzzle | null {
-  for (let i = 0; i < 40; i++) {
-    const result = build(diff)
-    generationStats.attempts++
-    if (!result) { generationStats.rejected++; continue }
-    return {
-      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${diff} puzzle`,
-      diff,
-      grid: result.grid,
-      rack: result.rack,
-      optimalMoves: result.minMoves,
-      generated: true,
-      archetypeId: 'runs-to-groups-composed',
-    }
-  }
-  return null
-}
+/** Cut-point puzzles: duplicate second copies force an already-valid run to be cut apart. */
+const generateCutPoint = (diff: Difficulty): Puzzle | null => generateWith(diff, 'cut-point', buildCutPoint)
 
-/** Decoy puzzles reuse the shared Puzzle shape; the hidden `archetypeId` marks
- * them internally (nothing player-facing reads it), consistent with direction. */
-function generateDecoy(diff: Difficulty, build: TrapBuilder = buildDecoyVariant): Puzzle | null {
-  for (let i = 0; i < 40; i++) {
-    const result = build(diff)
-    generationStats.attempts++
-    if (!result) { generationStats.rejected++; continue }
-    return {
-      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${diff} puzzle`,
-      diff,
-      grid: result.grid,
-      rack: result.rack,
-      optimalMoves: result.minMoves,
-      generated: true,
-      archetypeId: 'runs-to-groups-decoy',
-    }
-  }
-  return null
-}
+/** Composed puzzles: decoy + red herring on one board. */
+const generateComposed = (diff: Difficulty, build: TrapBuilder = buildComposedVariant): Puzzle | null =>
+  generateWith(diff, 'runs-to-groups-composed', build)
 
-/** Red-herring puzzles, same hidden-tag convention as decoy. */
-function generateRedHerring(diff: Difficulty, build: TrapBuilder = buildRedHerringVariant): Puzzle | null {
-  for (let i = 0; i < 40; i++) {
-    const result = build(diff)
-    generationStats.attempts++
-    if (!result) { generationStats.rejected++; continue }
-    return {
-      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${diff} puzzle`,
-      diff,
-      grid: result.grid,
-      rack: result.rack,
-      optimalMoves: result.minMoves,
-      generated: true,
-      archetypeId: 'runs-to-groups-redherring',
-    }
-  }
-  return null
-}
+const generateDecoy = (diff: Difficulty, build: TrapBuilder = buildDecoyVariant): Puzzle | null =>
+  generateWith(diff, 'runs-to-groups-decoy', build)
+
+const generateRedHerring = (diff: Difficulty, build: TrapBuilder = buildRedHerringVariant): Puzzle | null =>
+  generateWith(diff, 'runs-to-groups-redherring', build)
 
 export function generateArchetype(type: ArchetypeType, diff: Difficulty): Puzzle | null {
-  const build = BUILDERS[type]
-  for (let i = 0; i < 40; i++) {
-    const result = build(diff)
-    generationStats.attempts++
-    if (!result) { generationStats.rejected++; continue }
-
-    return {
-      id: `gen_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${diff} puzzle`,
-      diff,
-      grid: result.grid,
-      rack: result.rack,
-      optimalMoves: result.minMoves,
-      generated: true,
-      archetypeId: type,
-    }
-  }
-  return null
+  return generateWith(diff, type, BUILDERS[type])
 }
