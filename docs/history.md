@@ -49,3 +49,17 @@
 - DarkVeil credited after reading the React Bits license (MIT + Commons Clause)
   and ogl's (Unlicense).
 - Lint 8 → 0 and added to `npm run verify`.
+
+## 2026-11-15 — uniqueness gate + tier bands (branch `generator-uniqueness-tiers`)
+- Baseline first, on `main`, with a seeded audit (n=1000 per tier): 29.4% of
+  medium puzzles had two solutions; hard and extreme had none. The recorded
+  "16 / 81 solutions" were cuts of one solution.
+- Added `distinctSolutions` (exhaustive, stops at the second), `tierBands.ts`,
+  one gated retry loop in `generator.ts`, and `uniqueness.verify.ts` (51).
+- The new harness failed once: 17 of 3,971 random bags disagreed with brute
+  force. Root cause was in the brute-force side, a duplicate-ordering bug
+  inherited from `partitionCount`. Fixed there; the search was right.
+- groups-to-runs medium rack 3 → 4; chain medium → easy; extreme runs-to-groups
+  L=8 → L=9 (par 26).
+- Not merged, not deployed.
+

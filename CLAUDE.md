@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-11 — repo polish: real README + screenshots, DarkVeil credited, lint at 0 and part of `npm run verify`; merged and deployed.*
+*Last updated: 2026-11-15 — generator uniqueness gate + par tier bands on branch `generator-uniqueness-tiers`; NOT merged, NOT deployed.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -16,7 +16,7 @@ base must always be '/puzzikub/' — never change this, never remove it.
 ## Testing & verification workflow
 ### THE STANDING SAFETY NET — run this, do not list harnesses by hand
 ```
-npm run verify        build + lint + 11 engine harnesses + verify:mobile + verify:library  (~6 min)
+npm run verify        build + lint + 12 engine harnesses + verify:mobile + verify:library  (~6 min)
 npm run verify:full   the same + valueGroupPlanner                                  (~8 min)
 ```
 Run `verify` before AND after any change; run `verify:full` before merging.
@@ -211,12 +211,12 @@ says "par", never "optimal".
 | archetype | tiers | par | mechanic |
 |---|---|---|---|
 | `groups-to-runs` | all | 11/16/20/~24 | board = value groups, goal = colour runs |
-| `runs-to-groups` | all | 11/16/20/23 | the mirror |
+| `runs-to-groups` | all | 11/16/20/26 | the mirror |
 | `runs-to-groups-decoy` | hard, extreme | 22 / 25 (variants 19-23 / 22-27) | ONE tempting run-extension that dead-ends |
 | `runs-to-groups-redherring` | hard, extreme | 21 / 24 (shipped: 20-24 / 27-32) | TWO tempting extenders, both dead ends |
 | `runs-to-groups-composed` | hard, extreme | 24 / 27 (extreme also 31) | decoy + red herring on one board, coupled |
 | `cut-point` | **medium only** | **12** | **duplicates force valid runs to be CUT APART** |
-| `chain` | **medium only** | **9** | **a DEDUCTIVE chain: 8 forced deductions in sequence** |
+| `chain` | **easy only** (was medium until 2026-11-15) | **9** | **a DEDUCTIVE chain: 8 forced deductions in sequence** |
 
 `archetypeId` is internal only — nothing player-facing names the mechanic.
 Dev-only `?forceArchetype=` accepts all of them (each still tier-restricted).
@@ -830,6 +830,10 @@ src/lib/pairingMin.verify.ts        31   (~9 min — BFS-bound, run it in
                                           the background and keep working)
 src/lib/storage.verify.ts           37
 src/lib/dragIdentity.verify.ts      29
+src/lib/uniqueness.verify.ts        51   (the uniqueness proof: a known two-solution
+                                          puzzle is refused; search == brute force on
+                                          3,971 random bags; every shipped puzzle is
+                                          unique and inside its tier's par band)
 src/lib/trapVariants.verify.ts     118   (every shipped trap/chain VARIANT: proof,
                                           invariants, replay, pinned par, and
                                           four broken variants that must fail)
@@ -843,6 +847,87 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-15 — uniqueness gate + tier bands (branch `generator-uniqueness-tiers`): NOT merged, NOT deployed
+Tier moves here are feel decisions: play the branch before merging. Numbers and
+method are in **`GENERATOR_AUDIT.md` §8**. Everything below is from
+`npx tsx src/lib/generatorAudit.ts 1000 "SHIPPED MIX"` (seed 20261115, n=1000 per
+tier) run on `main` and on this branch.
+
+**CORRECTIONS to earlier notes in this file and in GENERATOR_AUDIT.md:**
+- *"groups-to-runs has 2 / 16 / 81 solutions at medium / hard / extreme"* was
+  half wrong. **16 and 81 were never extra solutions.** They are 2^4 and 3^4: the
+  one solution's four long runs, each cut in two or not. Hard and extreme had 0
+  multi-solution puzzles before this session and have 0 now. **The 2 at medium was
+  real** (29.4% of shipped medium puzzles) and is fixed.
+- *"Medium mixes technique levels 0-3"*: the level-3 share was mostly the rater
+  grading a free choice as its hardest technique (338 of 1000 by the old rater,
+  44 by the fixed one). The real leak was on par: chain (par 9) sat in medium.
+- `partitionCount` had a bug on bags with duplicate tiles (it could return 0 for
+  a solvable bag). No shipped gate depended on it for duplicate bags; fixed.
+- No earlier note claimed items 6-7 fixed in this file; they were listed open.
+  They are now closed only in the sense table D confirms, below.
+
+**What the script now confirms (table D, n=1000 per tier, same seed):**
+
+| tier | >1 distinct solution, before → after | par outside band, before → after | gen ms mean / p95, before → after |
+|---|---|---|---|
+| easy (band 9-11) | 0 → 0 | 10 → 0 | 1.7 / 3.5 → 2.0 / 3.8 |
+| medium (12-16) | **294 → 0** | **202 → 0** | 4.1 / 9.6 → 5.0 / 9.9 |
+| hard (17-24) | 0 → 0 | 2 → 0 | 7.9 / 22.0 → 8.2 / 22.2 |
+| extreme (25-32) | 0 → 0 | **221 → 0** | 25.4 / 125.6 → 14.3 / 77.7 |
+
+**What changed:**
+- **`distinctSolutions(bag, cap)` in `difficultyProxy.ts` is the uniqueness
+  proof.** Exhaustive, stops at the second solution, no sampling and no node cap.
+  Two partitions are the same solution when the same tiles are in the same
+  groups. It costs at most 1.6 ms per puzzle (max 468 nodes), so no cheaper
+  alternative was needed at extreme. `distinctSolutionsBrute` is its independent
+  oracle: ***do not delete it***, same role as `solveBag`.
+- **`tierBands.ts` holds the par bands and `shipVerdict`.** `generateWith` in
+  `generator.ts` is now the ONE retry loop for every archetype; it refuses any
+  build that is not proved unique or whose par is outside its tier's band.
+- **groups-to-runs medium: rack 3 → 4.** With three boundary tiles every bag had
+  a second solution. Par 11-15 → 12-16.
+- **Chain moved from medium to easy** (par 9, technique L0). `?forceArchetype=chain`
+  now works at easy only.
+- **Deliberate par recalibration: extreme runs-to-groups is L=9 / rack 5 / par 26**
+  (was L=8 / par 23, which is inside the hard band). 11×11 grid, ~80 ms a build.
+- Extreme groups-to-runs and decoy builds under par 25 are redrawn (190 redraws
+  per 1000 puzzles).
+- `generatorAudit.ts` is seeded, reports distinct solutions next to strict
+  partitions, prints both rater readings, has verdict table D, and exits 1 on a
+  failing shipped tier. `techniqueLadder` reports `freeChoices` separately.
+- Gate: `npm run verify` 16/16 (build, lint, twelve harnesses incl.
+  `uniqueness.verify.ts` 51/0, `verify:mobile` 42/24/54, `verify:library` 37);
+  `valueGroupPlanner.verify.ts` 29/0 with the extreme par pinned at 26.
+
+**Still open:**
+- **Tiers are separated on par only.** Technique level does not order the tiers
+  and cannot with the current archetypes: after this session easy is L0-L2,
+  medium L1-L3, hard L0-L3, extreme L0-L3. Hard and extreme groups-to-runs are
+  technique L0 (singles and free choices): by reasoning they are the easiest
+  puzzles in their tiers. Not changed, because the fix is a design decision.
+- **Strict partitions are not 1 at hard/extreme groups-to-runs** (287 and 136 of
+  1000) and cannot be while a goal run has six or more tiles. Not measured:
+  whether laying a run as two short ones can beat par there. Par is an upper
+  bound, so it may.
+- Cut-point stays in medium at par 12, the bottom of the band, with technique L1.
+- **Chain on a phone: the rack starts below the fold.** Its board is 10 rows, so
+  at 100% scale on a 390px-wide phone viewport the rack is off screen until the
+  page is scrolled. This was already true at medium; it is now 20% of easy
+  puzzles. The browser rigs redraw a random puzzle until the rack is on screen
+  (`scripts/lib/app.mjs`); `RIG_QUERY='?forceArchetype=chain' node
+  scripts/verify-touch.mjs` reproduces it (42 passed, 12 failed). UI was out of
+  scope, so it is not fixed.
+- `?forceArchetype=red-herring-classic` returns null at extreme now (par 24 is in
+  the hard band). It was already unshipped there.
+- `redherring.verify.ts`'s 5 ms budget failed once under `verify:full` (the
+  background planner harness was running) and passes alone and under `verify`.
+- The bands are mine, chosen from the pars the builders already hit. Nothing here
+  has been played by a person.
+- iOS Safari / real-device touch testing; red herring at hard still L1; the
+  deduction-chain-plus-trap layer; COUPLED redesign.
+
 ### 2026-11-11 — repo polish (branch `repo-polish`): merged and deployed
 - **README.md is real**, replacing the Vite template. Every claim was taken from
   the repo. Its quick-start was run literally in a fresh clone: install, build,
@@ -929,7 +1014,8 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
     but they are effectively "place the runs" puzzles.
 - **Still open overall:** iOS Safari / real-device touch testing; groups-to-runs
   multiple solutions; red herring at hard still technique L1; the
-  deduction-chain-plus-trap layer; COUPLED redesign; medium calibration.
+  deduction-chain-plus-trap layer; COUPLED redesign. *(groups-to-runs solutions
+  and medium calibration: see the 2026-11-15 section.)*
 
 ### 2026-11-11 — `generator-audit` + `trap-variety` MERGED into `main` and DEPLOYED
 - `main` was fast-forwarded 81715a7 → 40213ca → ff175ef (no conflicts) and pushed.
@@ -943,7 +1029,7 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
   (`index-ZVJv3XFh.js`, `index-Cqk8mWV_.css`). The CDP rig loaded the live site:
   easy rendered with par 11 and rack 2; extreme rendered as 10×10 with par 23 and rack 5.
 - **Still open:** iOS Safari / real-device touch testing; groups-to-runs
-  has multiple solutions (2/16/81); red herring at hard is still technique L1;
+  "has multiple solutions (2/16/81)" *(WRONG as stated: see 2026-11-15)*; red herring at hard is still technique L1;
   the deduction-chain-plus-trap layer; COUPLED blocks redesign; medium
   calibration. Nothing on the new variants has been played by anyone but Ian locally.
 
@@ -988,7 +1074,7 @@ method are in **`GENERATOR_AUDIT.md` §7**.
 25 means admitting L=7 into hard — one line, not done because it is bigger than
 anything else in the tier); no L2 red herring small enough for hard; and the
 rest of `GENERATOR_AUDIT.md` §5 (a deduction-chain-plus-trap layer, groups-to-
-runs having 2/16/81 solutions, medium calibration). Nothing here has been
+runs having 2/16/81 solutions, medium calibration — both closed 2026-11-15). Nothing here has been
 played by a person.
 
 ### Branch `generator-audit` (2026-11-11) — MERGED + deployed 2026-11-11
@@ -1016,7 +1102,7 @@ Full numbers, method and the ranked open leads are in **`GENERATOR_AUDIT.md`**.
 **Measured but NOT changed (ranked in GENERATOR_AUDIT.md §5):** trap layers have
 only 3-6 structural shapes; red herring needs only stranding (L1) on the
 technique ladder, weaker than plain easy runs-to-groups; groups-to-runs has
-2/16/81 solutions at medium/hard/extreme; medium mixes technique levels 0-3 and
+2/16/81 solutions at medium/hard/extreme *(16 and 81 were cuts of one solution, see 2026-11-15)*; medium mixes technique levels 0-3 and
 par 9-16; no archetype combines a forced deduction chain with a trap. The
 proxies are structural and have not been checked against a human solver.
 
@@ -1113,7 +1199,7 @@ difficulty, but now tuned to land in the same range as `groups-to-runs`:
 | easy | 5 | 2 | 11 | 10.6 |
 | medium | 6 | 4 | 16 | 13.4 |
 | hard | 7 | 5 | 20 | 20.0 |
-| extreme | 8 | 5 | 23 | 23.9 |
+| extreme | 9 | 5 | 26 | 25-26 after the band gate |
 
 *(extreme row updated in the generator-audit session; the two paragraphs below
 are HISTORY — the L! wall they describe is gone, see the status note above.)*

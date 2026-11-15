@@ -16,8 +16,8 @@ filters rows (`... 200 decoy`). The proxies live in `src/lib/difficultyProxy.ts`
 | 3 | Extreme runs-to-groups was the same puzzle as hard (L=7, par 20) | **fixed**: L=8, par 23 (deliberate recalibration) |
 | 4 | Trap layers have 3 structural shapes each (6 for composed, 6 for chain) | **done on `trap-variety`**: 18-48 per tier, see §7 |
 | 5 | Red herring needs a weaker technique than plain easy runs-to-groups | **extreme done** (L2), hard band cut, see §7.3 |
-| 6 | groups-to-runs has 2 / 16 / 81 solutions at medium / hard / extreme | open |
-| 7 | Medium mixes technique levels 0-3 and par 9-16 | open |
+| 6 | groups-to-runs has 2 / 16 / 81 solutions at medium / hard / extreme | **corrected and fixed, §8**: 16 and 81 were cuts of one solution; the 2 at medium was real and is gone |
+| 7 | Medium mixes technique levels 0-3 and par 9-16 | **par fixed, §8** (12-16); technique still spans L1-L3 |
 
 Par is not a difficulty measure across archetypes, and no single proxy below is
 either. The technique ladder (proxy 6) is the closest thing to a shared yardstick
@@ -640,3 +640,66 @@ variant. Nothing player-facing names a variant.
   `pairingMin`, `valueGroupPlanner`, `trapVariants`), and the audit has a
   "builder rejections" column fed by `generationStats` in `generator.ts`.
 - `refutationDepth` was added to `difficultyProxy.ts`.
+
+## 8. Uniqueness and tier bands (branch `generator-uniqueness-tiers`, 2026-11-15)
+
+Not merged, not deployed. Evidence: `npx tsx src/lib/generatorAudit.ts 1000 "SHIPPED MIX"`
+(seed 20261115) on `main` and on the branch, and `npx tsx src/lib/uniqueness.verify.ts`.
+"Before" is `main`'s generator measured with this branch's script.
+
+### 8.1 What was wrong with this script
+
+| problem | effect | fix |
+|---|---|---|
+| No seed | every run measured different puzzles; before/after were two samples | `Math.random` replaced by a seeded generator, re-seeded per row |
+| "solutions" was `partitionCount` | a run of six and the same tiles as 3+3 counted as two answers: the 16 (2^4) and 81 (3^4) in §3 | reports strict partitions and distinct solutions; distinct is by brute force, checked against the gate's search on every puzzle |
+| `partitionCount` wrong on duplicate tiles | undercounted, sometimes 0 for a solvable bag (17 of 3,971 random bags) | sets ordered by content, not list position |
+| rater graded a free choice as L3 | every groups-to-runs bag with a long run read "hardest technique 3" | free choices counted separately; both readings printed |
+| no tier definition, no verdict | distributions only | bands in `tierBands.ts`, table D, exit 1 on failure |
+
+### 8.2 Before and after (n = 1000 per tier, seed 20261115)
+
+| tier | band | >1 distinct solution | >1 strict partition | par range | par outside band | rates as | gen ms mean / p95 / max |
+|---|---|---|---|---|---|---|---|
+| easy, before | 9-11 | 0 | 0 | 10-12 | 10 (1.0%) | easy 990, medium 10 | 1.7 / 3.5 / 9.5 |
+| easy, after | | 0 | 0 | 9-11 | 0 | easy 1000 | 2.0 / 3.8 / 11.4 |
+| medium, before | 12-16 | **294 (29.4%)** | 294 | 9-16 | **202 (20.2%)** | easy 202, medium 798 | 4.1 / 9.6 / 12.6 |
+| medium, after | | **0** | 0 | 12-16 | **0** | medium 1000 | 5.0 / 9.9 / 12.0 |
+| hard, before | 17-24 | 0 | 288 | 16-24 | 2 (0.2%) | medium 2, hard 998 | 7.9 / 22.0 / 25.1 |
+| hard, after | | 0 | 287 | 17-24 | 0 | hard 1000 | 8.2 / 22.2 / 26.2 |
+| extreme, before | 25-32 | 0 | 121 | 20-32 | **221 (22.1%)** | hard 221, extreme 779 | 25.4 / 125.6 / 404.9 |
+| extreme, after | | 0 | 136 | 25-32 | **0** | extreme 1000 | 14.3 / 77.7 / 104.1 |
+
+Hardest technique (level:count), fixed rater, before → after: easy 1:515 2:485 →
+0:196 1:386 2:418; medium 0:195 1:525 2:236 3:44 → 1:637 2:307 3:56; hard
+0:288 1:83 2:528 3:101 → 0:287 1:80 2:534 3:99; extreme 0:121 2:823 3:56 →
+0:136 2:789 3:75. By the old rater medium read 3:338 and hard 3:389.
+
+Shipped mix after: easy runs-to-groups 42%, groups-to-runs 39%, chain 20%; medium
+groups-to-runs 37%, runs-to-groups 36%, cut-point 27%; hard and extreme unchanged
+within two points. Invariant (a)-(d) failures 0; gate vs brute force
+disagreements 0.
+
+### 8.3 Why medium leaked
+
+- **Two solutions (generator).** Medium groups-to-runs had L=4 and three boundary
+  rack tiles, so one colour had none. That colour's last value can join a group
+  with the two colours whose runs stop short of it. 200 of 200 builds had exactly
+  two distinct solutions. With a boundary tile on all four colours: 200 of 200
+  unique.
+- **Par (generator's target).** Chain was assigned to medium by hand with par 9,
+  under every easy puzzle (10-12), and technique L0. That is 195 of the 202
+  out-of-band puzzles; the other 7 were groups-to-runs at par 11.
+- **Technique L3 (rater).** 294 of the 338 "level 3" medium puzzles were the
+  two-solution bags, where the step is a free choice. The remaining 44 are
+  runs-to-groups builds that do need a step beyond chain reasoning.
+- Thresholds were not a cause: there were none.
+
+### 8.4 What the bands do and do not mean
+
+The bands are on par, are disjoint, and cover 9-32. Par is what the builders are
+parameterised on and what the player sees. They do not make technique level
+uniform inside a tier, and hard/extreme groups-to-runs rate L0. Strict partitions
+above 1 remain wherever a goal run has six or more tiles; whether a cut layout
+beats par there was not measured.
+
