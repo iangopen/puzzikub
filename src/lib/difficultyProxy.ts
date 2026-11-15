@@ -79,31 +79,188 @@ const apply = (cnt: Counts, s: LSet, d: number): void => { for (const i of s) cn
 const formable = (cnt: Counts, s: LSet): boolean => s.every(i => cnt[i] > 0)
 
 /**
- * PROXY 1 — SOLUTION COUNT. Label-distinct partitions of the bag into valid
- * sets, capped. The smallest remaining label must be covered next; when a
- * label has two copies, the second copy's set is forced to come no earlier in
- * the candidate order than the first's, so {A,B} is not counted again as {B,A}.
+/** A fixed total order on sets (by content), used to count {A,B} once. */
+function setOrder(a: LSet, b: LSet): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i]
+  return a.length - b.length
+}
+
+/**
+ * PROXY 1 — STRICT PARTITION COUNT. Label-distinct partitions of the bag into
+ * valid sets, capped. The smallest remaining label must be covered next; when a
+ * label has two copies, the second copy's set must not come before the first's
+ * in `setOrder`, so {A,B} is not counted again as {B,A}.
+ *
+ * BUG FIXED in the uniqueness/tier session: that rule used to compare POSITIONS
+ * in the candidate list, but the list is rebuilt after the first copy's set is
+ * removed, so the positions meant different sets. On bags with duplicate tiles
+ * it undercounted, sometimes to 0 for a solvable bag (found by
+ * uniqueness.verify.ts section 4: 17 of 3971 random bags). Bags without
+ * duplicates were never affected.
+ *
+ * This counts a run of six and the same tiles as two runs of three as TWO
+ * partitions. For "does this puzzle have one answer" use `distinctSolutions`.
  */
 export function partitionCount(bag: Tile[], cap = 1000): number {
   const cnt = countsOf(bag)
   let found = 0
-  const rec = (from: number, lastIdx: number, lastChoice: number): void => {
+  const rec = (from: number, lastIdx: number, lastSet: LSet | null): void => {
     if (found >= cap) return
     let i = from
     while (i < cnt.length && cnt[i] === 0) i++
     if (i === cnt.length) { found++; return }
-    const cands = setsContaining(cnt, i)
-    for (let k = i === lastIdx ? lastChoice : 0; k < cands.length; k++) {
+    for (const s of setsContaining(cnt, i)) {
       // The smallest label can only START a run — nothing below it remains.
-      if (cands[k][0] !== i) continue
-      apply(cnt, cands[k], -1)
-      rec(i, i, k)
-      apply(cnt, cands[k], +1)
+      if (s[0] !== i) continue
+      if (i === lastIdx && lastSet && setOrder(s, lastSet) < 0) continue
+      apply(cnt, s, -1)
+      rec(i, i, s)
+      apply(cnt, s, +1)
       if (found >= cap) return
     }
   }
-  rec(4, -1, 0)
+  rec(4, -1, null)
   return found
+}
+
+/** One group as a 4-bit colour mask, and every mask with >= 3 colours. */
+const GROUP_MASKS = [0b0111, 0b1011, 0b1101, 0b1110, 0b1111]
+
+/**
+ * Run-feasibility automaton for ONE colour, walked value by value. A state is
+ * the lengths (capped at 3) of the up-to-two runs still open at the previous
+ * value, packed as `a * 4 + b` with a >= b and 0 = no run. A run may stop only
+ * at length >= 3. `c` is how many tiles of this colour sit at the next value.
+ */
+function runStep(states: Set<number>, c: number): Set<number> {
+  const out = new Set<number>()
+  const closable = (x: number): boolean => x === 0 || x === 3
+  const grow = (x: number): number => Math.min(3, x + 1)
+  const put = (x: number, y: number): void => { out.add(x >= y ? x * 4 + y : y * 4 + x) }
+  for (const s of states) {
+    const a = s >> 2
+    const b = s & 3
+    if (c === 0) { if (closable(a) && closable(b)) put(0, 0); continue }
+    if (c === 1) {
+      if (a > 0 && closable(b)) put(grow(a), 0)
+      if (b > 0 && closable(a)) put(grow(b), 0)
+      if (closable(a) && closable(b)) put(1, 0)
+      continue
+    }
+    if (a > 0 && b > 0) put(grow(a), grow(b))
+    if (a > 0 && closable(b)) put(grow(a), 1)
+    if (b > 0 && closable(a)) put(grow(b), 1)
+    if (closable(a) && closable(b)) put(1, 1)
+  }
+  return out
+}
+
+export interface DistinctSolutions {
+  /** Distinct solutions found, never more than `cap`. */
+  count: number
+  /** Search nodes visited (one per value per group choice). */
+  nodes: number
+}
+
+/**
+ * THE UNIQUENESS PROOF. Counts the DISTINCT SOLUTIONS of a bag, exhaustively,
+ * stopping as soon as `cap` are found (cap 2 = "prove unique or find a second").
+ *
+ * Two partitions are the SAME solution when they put the same tiles into the
+ * same groups. They can then differ only in where a colour's run tiles are cut
+ * into runs (a run of six is also two runs of three), and that is not a second
+ * answer: laid on the board the cut and uncut rows are the same tiles in the
+ * same order. `partitionCount` counts those cuts separately, which is why it
+ * reported 16 and 81 "solutions" for bags that have exactly one.
+ *
+ * Method: walk the values 1..13. At each value choose which groups are formed
+ * there (none, one or two); every tile not grouped must be in a run, so each
+ * colour's leftovers feed a small automaton (`runStep`) that tracks the runs
+ * still open. A branch dies the moment a colour has no way to continue. A leaf
+ * is a group choice whose leftovers decompose into runs, i.e. one solution, and
+ * each solution is reached exactly once (two groups at a value are generated in
+ * mask order only). No sampling, no node cap: the search is complete.
+ */
+export function distinctSolutions(bag: Tile[], cap = 2): DistinctSolutions {
+  if (bag.length === 0) return { count: 0, nodes: 0 }
+  const cnt = countsOf(bag)
+  for (let i = 4; i < cnt.length; i++) if (cnt[i] > 2) return { count: 0, nodes: 0 }
+  let count = 0
+  let nodes = 0
+  const start = new Set([0])
+  const rec = (v: number, states: Set<number>[]): void => {
+    if (count >= cap) return
+    if (v === NV) {
+      // Past value 13: every colour must be able to close all its runs.
+      if (states.every(st => runStep(st, 0).size > 0)) count++
+      return
+    }
+    const base = v * 4
+    const tryLeftover = (): void => {
+      nodes++
+      const next: Set<number>[] = []
+      for (let k = 0; k < 4; k++) {
+        const st = runStep(states[k], cnt[base + k])
+        if (st.size === 0) return
+        next.push(st)
+      }
+      rec(v + 1, next)
+    }
+    const fits = (m: number): boolean => {
+      for (let k = 0; k < 4; k++) if ((m >> k) & 1 && cnt[base + k] === 0) return false
+      return true
+    }
+    const take = (m: number, d: number): void => { for (let k = 0; k < 4; k++) if ((m >> k) & 1) cnt[base + k] += d }
+    tryLeftover() // no group at this value
+    for (let i = 0; i < GROUP_MASKS.length && count < cap; i++) {
+      const m1 = GROUP_MASKS[i]
+      if (!fits(m1)) continue
+      take(m1, -1)
+      tryLeftover() // one group
+      for (let j = i; j < GROUP_MASKS.length && count < cap; j++) {
+        const m2 = GROUP_MASKS[j]
+        if (!fits(m2)) continue
+        take(m2, -1)
+        tryLeftover() // two groups
+        take(m2, +1)
+      }
+      take(m1, +1)
+    }
+  }
+  rec(1, [start, start, start, start])
+  return { count, nodes }
+}
+
+/**
+ * The same number by brute force, for the harness only: enumerate every strict
+ * partition and collect the distinct group sets. Slow and capped by partitions,
+ * so it is the independent oracle for `distinctSolutions`, never a gate.
+ */
+export function distinctSolutionsBrute(bag: Tile[], partitionCap = 200_000): { count: number; partitions: number; groupSets: string[][] } {
+  const cnt = countsOf(bag)
+  const sigs = new Set<string>()
+  const groups: string[] = []
+  let partitions = 0
+  const rec = (from: number, lastIdx: number, lastSet: LSet | null): void => {
+    if (partitions >= partitionCap) return
+    let i = from
+    while (i < cnt.length && cnt[i] === 0) i++
+    if (i === cnt.length) { partitions++; sigs.add([...groups].sort().join(';')); return }
+    for (const s of setsContaining(cnt, i)) {
+      if (s[0] !== i) continue
+      if (i === lastIdx && lastSet && setOrder(s, lastSet) < 0) continue
+      const isGroup = (s[0] >> 2) === (s[1] >> 2)
+      apply(cnt, s, -1)
+      if (isGroup) groups.push(s.join(','))
+      rec(i, i, s)
+      if (isGroup) groups.pop()
+      apply(cnt, s, +1)
+    }
+  }
+  rec(4, -1, null)
+  const name = (i: number): string => `${i >> 2}${COLORS[i & 3]}`
+  const groupSets = [...sigs].map(sig => (sig === '' ? [] : sig.split(';').map(g => g.split(',').map(x => name(+x)).join(' '))))
+  return { count: sigs.size, partitions, groupSets }
 }
 
 export interface TrapDensity {
@@ -267,8 +424,14 @@ export function boardTraps(grid: Grid, rack: Tile[]): BoardTraps {
 export interface TechniqueLadder {
   /** Deduction steps taken at each technique level, [L0, L1, L2, L3]. */
   steps: [number, number, number, number]
-  /** Hardest technique the puzzle needed (0-3). */
+  /** Hardest technique the puzzle needed (0-3). Free choices do not count. */
   maxLevel: number
+  /**
+   * Steps where no technique applied because nothing needed deducing: some tile
+   * had two or more sets that EACH leave a solvable bag, so the solver just took
+   * one. On a bag with one distinct solution these are cuts of a long run.
+   */
+  freeChoices: number
 }
 
 /**
@@ -289,6 +452,7 @@ export interface TechniqueLadder {
 export function techniqueLadder(bag: Tile[]): TechniqueLadder {
   const cnt = countsOf(bag)
   const steps: [number, number, number, number] = [0, 0, 0, 0]
+  let freeChoices = 0
 
   const labels = (): number[] => {
     const out: number[] = []
@@ -337,19 +501,33 @@ export function techniqueLadder(bag: Tile[]): TechniqueLadder {
       }
     }
     if (!pick) {
-      level = 3
-      for (const s of allSets(cnt)) {
-        apply(cnt, s, -1)
-        const ok = total(cnt) === 0 || solvable(cnt)
-        apply(cnt, s, +1)
-        if (ok) { pick = s; break }
+      // Nothing weaker works. Before calling it L3, separate the two cases the
+      // old fallback merged: a FREE CHOICE (a tile with >= 2 sets that each keep
+      // the bag solvable: nothing to deduce, take the largest) and a genuine L3
+      // step (every tile has exactly one workable set, but L0-L2 cannot see it).
+      // Grading free choices as L3 is what made every groups-to-runs bag with a
+      // run of six or more read as "hardest technique 3".
+      let forcedPick: LSet | null = null
+      let freePick: LSet | null = null
+      for (const i of labels()) {
+        const ok = setsContaining(cnt, i).filter(s => {
+          apply(cnt, s, -1)
+          const good = total(cnt) === 0 || solvable(cnt)
+          apply(cnt, s, +1)
+          return good
+        })
+        if (ok.length >= 2) { freePick = ok.reduce((a, b) => (b.length > a.length ? b : a)); break }
+        if (ok.length === 1 && !forcedPick) forcedPick = ok[0]
       }
-      if (!pick) break // unsolvable bag: nothing to grade
+      if (freePick) { apply(cnt, freePick, -1); freeChoices++; continue }
+      if (!forcedPick) break // unsolvable bag: nothing to grade
+      pick = forcedPick
+      level = 3
     }
     apply(cnt, pick, -1)
     steps[level]++
   }
-  return { steps, maxLevel: steps[3] ? 3 : steps[2] ? 2 : steps[1] ? 1 : 0 }
+  return { steps, maxLevel: steps[3] ? 3 : steps[2] ? 2 : steps[1] ? 1 : 0, freeChoices }
 }
 
 /**
