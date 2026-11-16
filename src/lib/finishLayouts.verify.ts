@@ -229,17 +229,17 @@ console.log('\n=== 2. the same puzzle solved whole, cut on one row, and cut acro
     check('the two halves touching in the right order are the whole run: won', !!r && r.won)
   }
   {
-    // PINNED EXISTING BEHAVIOUR, not an endorsement: isValidRun sorts by value, so
-    // a run's tiles may stand in ANY left-to-right order. "5 6 7 2 3 4" in one
-    // colour is accepted. Found by this harness; left unchanged because it is a
-    // rules decision (see CLAUDE.md). Par assumes runs are laid in order.
+    // Runs must read ascending left to right (validator.ts isOrderedRun, pinned by
+    // runOrder.verify.ts). The two halves touching in the WRONG order, e.g.
+    // "5 6 7 2 3 4" in one colour, are not a run: NOT won. This was accepted until
+    // 2026-11-15.
     const pieces = [
       { color: r0.color, lo: r0.lo + a0, hi: r0.hi, row: 0, col: 0 }, { color: r0.color, lo: r0.lo, hi: r0.lo + a0 - 1, row: 0, col: r0.hi - r0.lo + 1 - a0 },
       ...gapLayout(runs.slice(1), whole.slice(1)).map(q => ({ ...q, row: q.row + 1 })),
     ]
     const r = play(p, goalOf(bag, pieces))
     console.log(`  the two halves of a run touching in the WRONG order (${r0.lo + a0}-${r0.hi} then ${r0.lo}-${r0.lo + a0 - 1}): won=${r?.won}`)
-    check('KNOWN, pinned: a run whose tiles are out of left-to-right order is still accepted', !!r && r.won)
+    check('a run whose tiles are out of left-to-right order: NOT won, and cells are flagged', !!r && !r.won && r.state.rack.length === 0 && [...r.state.invalidCells].some(k => !k.startsWith('__v:')))
   }
   {
     // A valid board with one tile still in the rack is not a win.

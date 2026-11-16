@@ -23,7 +23,7 @@ const SEQUENTIAL = [
   'decoy.verify.ts', 'redherring.verify.ts', 'composed.verify.ts', 'cutpoint.verify.ts',
   'chain.verify.ts', 'mixedGoalPlanner.verify.ts', 'storage.verify.ts',
   'dragIdentity.verify.ts', 'trapVariants.verify.ts', 'uniqueness.verify.ts',
-  'finishLayouts.verify.ts',
+  'finishLayouts.verify.ts', 'runOrder.verify.ts',
 ]
 const BACKGROUND = ['pairingMin.verify.ts', ...(full ? ['valueGroupPlanner.verify.ts'] : [])]
 

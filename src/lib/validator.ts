@@ -77,8 +77,24 @@ function buildGroups(grid: Grid): GroupMaps {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/**
+ * A run AS LAID ON THE BOARD: one colour, values ascending by exactly one, left
+ * to right ("3 4 5"; never "5 3 4" or "5 4 3"). The Tutorial says runs are in
+ * "consecutive order" (src/components/Tutorial.tsx:11) and every example is
+ * ascending; the direction is the Rummikub convention. `isValidRun` stays
+ * order-free on purpose: the solver and builders reason about BAGS, which have
+ * no order. Only the grid check below reads order. Pinned by runOrder.verify.ts.
+ */
+export function isOrderedRun(tiles: Tile[]): boolean {
+  if (tiles.length < 3) return false
+  for (let i = 1; i < tiles.length; i++) {
+    if (tiles[i].c !== tiles[0].c || tiles[i].n !== tiles[i - 1].n + 1) return false
+  }
+  return true
+}
+
 function isCovered(hGroup: Group | null): boolean {
-  return !!(hGroup && hGroup.cells.length >= 3 && (isValidRun(hGroup.tiles) || isValidGroup(hGroup.tiles)))
+  return !!(hGroup && hGroup.cells.length >= 3 && (isOrderedRun(hGroup.tiles) || isValidGroup(hGroup.tiles)))
 }
 
 export function validateGrid(grid: Grid): boolean {
