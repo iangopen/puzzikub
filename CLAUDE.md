@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-15 — generator uniqueness gate + par tier bands on branch `generator-uniqueness-tiers`; NOT merged, NOT deployed.*
+*Last updated: 2026-11-15 — on branch `generator-uniqueness-tiers` (NOT merged, NOT deployed): uniqueness gate + par tier bands, then cut-aware groups-to-runs par, sticky rack, load-robust timing checks. Needs Ian's play-test before merging.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -16,7 +16,7 @@ base must always be '/puzzikub/' — never change this, never remove it.
 ## Testing & verification workflow
 ### THE STANDING SAFETY NET — run this, do not list harnesses by hand
 ```
-npm run verify        build + lint + 12 engine harnesses + verify:mobile + verify:library  (~6 min)
+npm run verify        build + lint + 13 engine harnesses + verify:mobile + verify:library  (~10 min)
 npm run verify:full   the same + valueGroupPlanner                                  (~8 min)
 ```
 Run `verify` before AND after any change; run `verify:full` before merging.
@@ -202,6 +202,12 @@ window slot saying "red 4" can be filled by either copy. Therefore:
   **The cut-point archetype sits at exactly d=6**, so lowering this constant
   breaks it; `cutpoint.verify.ts` pins the value.
 
+**groups-to-runs par is `planRunGoal`** (2026-11-15): the cheaper of the aligned
+whole-run layout and `planCutRunGoal` (`cutRunPlanner.ts`), which lets a long run
+be laid as shorter runs and lets strips sit anywhere. The aligned layout alone was
+beaten on 890 of 1,178 groups-to-runs puzzles (`GENERATOR_AUDIT.md` §9).
+Runs-to-groups par has NOT been checked the same way (free placement of groups).
+
 Known scope limit, unchanged: par is exact for the goal family a builder aims
 at, so it remains an **upper bound** on the true optimum over every conceivable
 winning layout. Full-win BFS is infeasible at real tile counts. Player-facing UI
@@ -210,7 +216,7 @@ says "par", never "optimal".
 ### 4. The archetypes now shipping
 | archetype | tiers | par | mechanic |
 |---|---|---|---|
-| `groups-to-runs` | all | 11/16/20/~24 | board = value groups, goal = colour runs |
+| `groups-to-runs` | easy, medium, hard (NOT extreme since 2026-11-15) | 9-10 / 12-15 / 17-20 (cut-aware, see `planRunGoal`) | board = value groups, goal = colour runs |
 | `runs-to-groups` | all | 11/16/20/26 | the mirror |
 | `runs-to-groups-decoy` | hard, extreme | 22 / 25 (variants 19-23 / 22-27) | ONE tempting run-extension that dead-ends |
 | `runs-to-groups-redherring` | hard, extreme | 21 / 24 (shipped: 20-24 / 27-32) | TWO tempting extenders, both dead ends |
@@ -394,7 +400,7 @@ export function getNewlyValidCells(prevGrid: Grid, newGrid: Grid): Set<string>
 reading `validator.ts`; this section used to say "either direction", which the
 code has not done for a long time): a tile is valid only if its maximal
 contiguous segment within its own ROW is a valid run or group of length ≥3.
-Vertical adjacency means nothing. Win condition: `rack.length === 0 && validateGrid(grid)` —
+Vertical adjacency means nothing. **Runs need not be in left-to-right order**:`isValidRun` sorts by value, so `11 12 13 8 9 10` in one colour is valid (pinned in`finishLayouts.verify.ts`; a rules decision, not changed). Win condition: `rack.length === 0 && validateGrid(grid)` —
 no bag-based fallback, ever.
 
 ### Generator + Archetypes (src/lib/generator.ts, src/lib/archetypes.ts)
@@ -801,6 +807,9 @@ src/lib/generator.ts      routes generatePuzzle(diff) to archetype builder(s)
 src/lib/difficultyProxy.ts   non-par difficulty proxies (solution count, technique
                              ladder, ...) + partitionCount, used by the
                              runs-to-groups uniqueness gate
+src/lib/playReducer.ts       the play reducer + THE FINISH CHECK (usePlayState wraps it)
+src/lib/cutRunPlanner.ts     planCutRunGoal (cut-aware run par) + searchCutRunGoal (adversary)
+src/lib/cutVsPar.ts          `npx tsx src/lib/cutVsPar.ts 1000` — can a cut beat par? (exit 1 if so)
 src/lib/generatorAudit.ts    `npx tsx src/lib/generatorAudit.ts 200 [filter]` —
                              the tables in GENERATOR_AUDIT.md (~10 min unfiltered)
 ```
@@ -811,14 +820,14 @@ LibraryScreen, EditorScreen, useEditor, usePlayState or storage).
 `scripts/verify-live.mjs`, default URL = the live site). Run it after every
 `npm run deploy`. It is committed on purpose: two sessions lost a throwaway version.
 
-**Browser checks — `npm run verify:mobile` (120 checks: mobile 42, wide 24,
-touch 54). Re-run after ANY change to Board/Rack/DragPreview/TileFace/useDrag/
+**Browser checks — `npm run verify:mobile` (174 checks: mobile 42, wide 24,
+touch 54, touch again with every puzzle forced to chain 54). Re-run after ANY change to Board/Rack/DragPreview/TileFace/useDrag/
 PlayScreen/App or index.css.** See "THE BROWSER VERIFICATION RIG".
 
 **Harnesses — run with `npx tsx <path>`. Re-run ALL of them after any
 `src/lib/` change; there is no test framework, these ARE the tests:**
 ```
-src/lib/verifyEngine.ts             53  (NOTE: not *.verify.ts — easy to miss
+src/lib/verifyEngine.ts             51  (NOTE: not *.verify.ts — easy to miss
                                          in a loop over *.verify.ts files)
 src/lib/decoy.verify.ts             23
 src/lib/redherring.verify.ts        25
@@ -830,7 +839,10 @@ src/lib/pairingMin.verify.ts        31   (~9 min — BFS-bound, run it in
                                           the background and keep working)
 src/lib/storage.verify.ts           37
 src/lib/dragIdentity.verify.ts      29
-src/lib/uniqueness.verify.ts        51   (the uniqueness proof: a known two-solution
+src/lib/finishLayouts.verify.ts     20   (the finish check wins on EVERY strict partition
+                                          of real L=5/6 puzzles, 1,164 layouts, through the
+                                          real playReducer; refuses invalid controls)
+src/lib/uniqueness.verify.ts        55   (the uniqueness proof: a known two-solution
                                           puzzle is refused; search == brute force on
                                           3,971 random bags; every shipped puzzle is
                                           unique and inside its tier's par band)
@@ -847,6 +859,41 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-15 (later) — finish check, cut-vs-par, sticky rack, timing checks (same branch): NOT merged, NOT deployed
+Detail and tables: **`GENERATOR_AUDIT.md` §9**.
+
+**Verified (real output):**
+- **The finish check accepts every equivalent layout.** No change was needed: the
+  win test never compares with a stored goal. The reducer moved verbatim to
+  `src/lib/playReducer.ts`; `finishLayouts.verify.ts` plays 1,164 layouts (every
+  strict partition of 8 real puzzles) through it: all won, none early.
+- **Par was wrong and is fixed.** Cutting a long run (hard/extreme) or just not
+  aligning the runs (easy/medium) beat groups-to-runs par on 890 of 1,178 puzzles
+  at n=1000/tier; extreme's real cost was 16-20 on all 136. Now `planRunGoal`.
+  After: 0 beaten by the planner or by an independent annealing search, 0 replay
+  failures. **Groups-to-runs no longer ships at extreme; hard uses L=6** (honest
+  par 17-20). Audit: all four tiers PASS, 0 multi-solution, 0 out of band.
+- **Chain rack on a phone**: the rig redraw was removed; forced chain at 390x844
+  went 42/12 → 54/0 with a sticky rack (`PlayScreen.tsx`). Permanent 4th suite
+  of `verify:mobile`. Screenshot `docs/screenshots/phone-chain.png`.
+- **Timing checks**: red herring = median of 25 after 3 warm-ups (< 5 ms);
+  uniqueness = search nodes <= 2000 + median < 5 ms. Mutation: a 4 ms injected
+  slowdown fails red herring. pairingMin's coverage loop (>= 265 BFS checks) had
+  a 480 s clock that ran out on a slow machine; the cap is now 1200 s.
+- Gate: `npm run verify` 17/17. `verify:full` NOT confirmed green: the first run
+  failed only pairingMin LINK 1 (30/1, the 480 s clock, fixed since); the re-run
+  was killed for low system memory after build, lint, verifyEngine 51/0, decoy
+  23/0. **Re-run `npm run verify:full` before merging.**
+
+**Needs Ian's play-test before merging:** extreme without groups-to-runs (now
+decoy 32%, runs-to-groups 24%, composed 23%, red herring 21%); hard groups-to-runs
+at L=6; the sticky rack on a real phone (it covers the lowest board rows until
+the page is scrolled; on chain those rows are empty).
+
+**Still open:** generation is slower (hard p95 22 → 65 ms, max 297 ms; extreme mean
+14 → 41 ms); runs-to-groups par not checked for free placement; out-of-order runs
+accepted (rules call); iOS Safari / real device.
+
 ### 2026-11-15 — uniqueness gate + tier bands (branch `generator-uniqueness-tiers`): NOT merged, NOT deployed
 Tier moves here are feel decisions: play the branch before merging. Numbers and
 method are in **`GENERATOR_AUDIT.md` §8**. Everything below is from
@@ -908,11 +955,9 @@ tier) run on `main` and on this branch.
   technique L0 (singles and free choices): by reasoning they are the easiest
   puzzles in their tiers. Not changed, because the fix is a design decision.
 - **Strict partitions are not 1 at hard/extreme groups-to-runs** (287 and 136 of
-  1000) and cannot be while a goal run has six or more tiles. Not measured:
-  whether laying a run as two short ones can beat par there. Par is an upper
-  bound, so it may.
+  1000) and cannot be while a goal run has six or more tiles. *(MEASURED later the same day: a cut layout beat par on every one; par fixed, see above.)*
 - Cut-point stays in medium at par 12, the bottom of the band, with technique L1.
-- **Chain on a phone: the rack starts below the fold.** Its board is 10 rows, so
+- *(FIXED later the same day: sticky rack, see above.)* **Chain on a phone: the rack starts below the fold.** Its board is 10 rows, so
   at 100% scale on a 390px-wide phone viewport the rack is off screen until the
   page is scrolled. This was already true at medium; it is now 20% of easy
   puzzles. The browser rigs redraw a random puzzle until the rack is on screen
@@ -921,7 +966,7 @@ tier) run on `main` and on this branch.
   scope, so it is not fixed.
 - `?forceArchetype=red-herring-classic` returns null at extreme now (par 24 is in
   the hard band). It was already unshipped there.
-- `redherring.verify.ts`'s 5 ms budget failed once under `verify:full` (the
+- *(FIXED later the same day: median-based check.)* `redherring.verify.ts`'s 5 ms budget failed once under `verify:full` (the
   background planner harness was running) and passes alone and under `verify`.
 - The bands are mine, chosen from the pars the builders already hit. Nothing here
   has been played by a person.

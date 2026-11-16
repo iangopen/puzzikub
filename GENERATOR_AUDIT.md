@@ -703,3 +703,93 @@ uniform inside a tier, and hard/extreme groups-to-runs rate L0. Strict partition
 above 1 remain wherever a goal run has six or more tiles; whether a cut layout
 beats par there was not measured.
 
+
+## 9. Cut layouts vs par, the finish check, phone layout, timing checks (2026-11-15, same branch)
+
+Not merged, not deployed. Evidence: `npx tsx src/lib/cutVsPar.ts 1000 20261115 20000`
+(new), `npx tsx src/lib/generatorAudit.ts 1000 "SHIPPED MIX"`, and
+`npx tsx src/lib/finishLayouts.verify.ts` (new). "Before" is the branch head
+`3577c3b` with only the two measuring files copied in.
+
+### 9.1 The finish check already accepts every equivalent layout
+
+The win test is `rack.length === 0 && validateGrid(grid)`; it never compares the
+board with a stored goal. The reducer was moved verbatim from `usePlayState.ts`
+into `src/lib/playReducer.ts` so a harness can drive the real code.
+`finishLayouts.verify.ts` takes 4 puzzles at each of L=5 and L=6, lays out
+EVERY strict partition (64 and 324 of them, matching `partitionCount`), each in
+three positions, and plays every layout move by move through `playReducer`:
+1,164 layouts, 1,140 with a cut run, all won, none before the last move.
+Negative controls (two colours touching, a 2+4 cut, one tile left in the rack)
+are refused with cells flagged.
+
+**Finding, not changed:** `isValidRun` sorts by value, so a run's tiles may
+stand in any left-to-right order. `11 12 13 8 9 10` in one colour wins. The
+harness pins this as current behaviour. Whether to require order is a rules
+decision.
+
+### 9.2 Par was beaten, widely
+
+Par for groups-to-runs was `planColorRunGoal`: one whole run per colour, all
+strips aligned on one column. Two things beat it: CUTTING a long run (each piece
+can be slid so one of its tiles stays put), and simply sliding whole runs out of
+line. `cutRunPlanner.ts` searches both (anchored pieces, then a steepest descent
+over single and paired piece moves, exhaustive when no run can be cut).
+`searchCutRunGoal`, a simulated-annealing search over free placements, is the
+independent check on it. Every layout counted below was replayed to a
+`validateGrid` win in exactly its move count (0 replay failures in both runs).
+
+| tier | g-t-r puzzles | shipped par | best known layout | par beaten | real cost outside band |
+|---|---|---|---|---|---|
+| easy, before | 386 | 10-11 | 8-10 | 315 (by 1-3) | 12 |
+| medium, before | 369 | 12-16 | 12-15 | 153 (by 1-3) | 0 |
+| hard, before | 287 | 17-22 | 14-18 | 286 (by 1-6) | 191 |
+| extreme, before | 136 | 25-26 | 16-20 | 136 (by 5-9) | 136 |
+| easy, after | 397 | 9-10 | = par | 0 | 0 |
+| medium, after | 369 | 12-15 | = par | 0 | 0 |
+| hard, after | 314 | 17-20 | = par | 0 | 0 |
+| extreme, after | 0 | - | - | - | - |
+
+Easy and medium never cut (no run is six long): their gap was alignment only.
+The annealing search beat the planner on 7 of the 287 hard puzzles "before" (by
+1) and on none "after". Neither search is a proof of optimality: par is still an
+upper bound, now over a much larger family.
+
+### 9.3 What changed
+
+- `planRunGoal` (archetypes.ts) = cheaper of `planColorRunGoal` and
+  `planCutRunGoal`; `buildGroupsToRuns` uses it.
+- **Groups-to-runs no longer ships at extreme.** Its honest par at L=6 is 17-20.
+  L=7 cannot replace it: 0 of 40 builds were unique and one took 12.6 s.
+- **Hard groups-to-runs is L=6** (honest par 17-20); L=5 (honest 15-17) is not
+  shipped. Medium and easy keep their sizes; builds whose new par is below the
+  band are redrawn by the existing gate (14 at easy per 1000, 3 at hard).
+
+### 9.4 Audit after (n = 1000 per tier, seed 20261115)
+
+| tier | >1 distinct | par | outside band | gen ms mean / p95 / max (before in §8.2) |
+|---|---|---|---|---|
+| easy | 0 | 9-11 | 0 | 2.5 / 3.7 / 12.7 |
+| medium | 0 | 12-16 | 0 | 16.7 / 29.2 / 108.4 |
+| hard | 0 | 17-24 | 0 | 29.8 / 64.8 / 297.1 |
+| extreme | 0 | 25-32 | 0 | 40.7 / 142.5 / 189.4 |
+
+Generation is slower: the cut planner runs on every groups-to-runs build, and
+extreme now draws runs-to-groups (L=9, ~80 ms) where it used to draw the cheap
+groups-to-runs half the time. Extreme mix: decoy 32%, runs-to-groups 24%,
+composed 23%, red herring 21%. Invariant failures 0; gate vs brute force 0.
+
+### 9.5 Chain on a phone and the timing checks
+
+- The rig redraw that hid the off-screen rack was removed. Forcing chain at
+  390x844 reproduced 42 passed / 12 failed. `PlayScreen.tsx` now wraps the rack
+  in `position: sticky; bottom: 0` (opaque background). Chain-forced touch run:
+  54 / 0, now a permanent fourth suite of `verify:mobile`. The rig's
+  visible-cell pickers now exclude cells under the rack or below the window.
+  Screenshot: `docs/screenshots/phone-chain.png` (rack 754-836 px).
+- Red herring 5 ms: the max of 12 cold builds failed because the first build in
+  a process is slow (7.6 ms vs 2.0 ms warm median). Now 3 warm-up builds, then
+  the median of 25 must be under 5 ms. A 4 ms injected slowdown fails it
+  (medians 6.2 / 6.6 ms).
+- Uniqueness proof: the max-time check failed on 4/4 tiers under `verify:full`
+  load. It now asserts search nodes <= 2000 (max seen 468) and median < 5 ms.

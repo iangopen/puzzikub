@@ -63,3 +63,20 @@
   L=8 → L=9 (par 26).
 - Not merged, not deployed.
 
+
+## 2026-11-15 (later) — finish check, cut-vs-par, sticky rack, timing checks (same branch)
+- Baseline: `verify` 16/16; `verify:full` FAILED (uniqueness max-time check, 4/4
+  tiers, under load).
+- Finish check: no bug. Reducer moved to `src/lib/playReducer.ts`; new
+  `finishLayouts.verify.ts` (20) plays every strict partition through it.
+  Found that out-of-order runs are accepted; pinned, not changed.
+- Cut vs par: new `cutRunPlanner.ts` + `cutVsPar.ts`. Groups-to-runs par was
+  beaten on 890/1,178 puzzles (n=1000/tier). Par is now `planRunGoal`;
+  groups-to-runs left extreme; hard uses L=6. `GENERATOR_AUDIT.md` §9.
+- Removed the rig's redraw-until-rack-visible loop; sticky rack in PlayScreen;
+  chain-forced touch suite added to `verify:mobile`; rig cell pickers skip cells
+  under the rack. Screenshot `docs/screenshots/phone-chain.png`.
+- Timing checks made load-robust: red herring (median after warm-up, mutation
+  tested), uniqueness (node count + median), pairingMin (coverage loop's clock
+  cap 480 s → 1200 s after it failed under a slow `verify:full`).
+- Not merged, not deployed.
