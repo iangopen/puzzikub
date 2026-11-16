@@ -1,6 +1,8 @@
 /**
  * `npm run verify:mobile` — one Vite dev server, then the three browser suites
- * in sequence: groundwork -> wide board -> touch drag. Exits non-zero if any
+ * in sequence: groundwork -> wide board -> touch drag -> touch drag again with
+ * EVERY puzzle forced to chain (the 10-row board whose rack used to start off a
+ * phone screen; the rigs never redraw to dodge it). Exits non-zero if any
  * check fails, so it is usable as a gate.
  *
  * Needs a local Chrome or Edge (override with CHROME_PATH). HEADFUL=1 shows
@@ -15,7 +17,11 @@ const srv = await startServer()
 console.log(`dev server: ${srv.url}`)
 const results = []
 try {
-  for (const [name, fn] of [['MOBILE-GROUNDWORK', runMobile], ['WIDE-BOARD', runWide], ['TOUCH-DRAG', runTouch]]) {
+  const runTouchChain = async u => {
+    process.env.RIG_QUERY = '?forceArchetype=chain'
+    try { return await runTouch(u) } finally { delete process.env.RIG_QUERY }
+  }
+  for (const [name, fn] of [['MOBILE-GROUNDWORK', runMobile], ['WIDE-BOARD', runWide], ['TOUCH-DRAG', runTouch], ['TOUCH-DRAG chain', runTouchChain]]) {
     console.log(`\n==================== ${name} ====================`)
     results.push([name, await fn(srv.url)])
   }

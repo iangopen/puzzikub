@@ -426,15 +426,26 @@ export function PlayScreen({ activeScreen, onNav, soundEnabled, onShowSettings, 
               />
             </div>
 
-            <Rack
-              tiles={rack}
-              drag={drag}
-              onTileMouseDown={handleTileMouseDown}
-              onTileTouchStart={handleTileTouchStart}
-              onRackEnter={() => setHover({ to: 'rack' })}
-              onRackLeave={() => setHover(null)}
-              scale={boardScale}
-            />
+            {/*
+              RACK PINNED TO THE BOTTOM OF THE VIEWPORT when the board is taller
+              than the screen. Chain's 10-row board is ~670px at 100%, so on a
+              390x844 phone the rack used to start below the fold and could not
+              be touched without scrolling first. `sticky` (not `fixed`) leaves
+              it in normal flow: when the page is scrolled down far enough the
+              rack sits in its own place under the board and covers nothing.
+              The opaque background keeps board rows from showing through.
+            */}
+            <div style={{ position: 'sticky', bottom: 0, zIndex: 2, background: 'var(--bg)', paddingBottom: 8 }}>
+              <Rack
+                tiles={rack}
+                drag={drag}
+                onTileMouseDown={handleTileMouseDown}
+                onTileTouchStart={handleTileTouchStart}
+                onRackEnter={() => setHover({ to: 'rack' })}
+                onRackLeave={() => setHover(null)}
+                scale={boardScale}
+              />
+            </div>
 
             {won && (
               <div style={{ color: '#27500A', fontSize: 13, margin: '12px 0' }}>

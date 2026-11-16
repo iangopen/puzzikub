@@ -90,24 +90,10 @@ export async function openPlay(page, baseUrl, { scale, query = '', diff, extraSt
     await clickButton(page, diff)
   }
   await waitForBoard(page)
-  // A random puzzle can be one whose rack starts below the fold: the chain
-  // archetype (20% of EASY since the uniqueness/tier session) has a 10-row board,
-  // which on a phone viewport pushes the rack off screen, so a touch aimed at a
-  // rack tile lands on <html>. Measured: forcing chain fails 12 touch checks.
-  // The drag rigs need the rack on screen, so a random puzzle is redrawn until
-  // it is. Explicit queries (forced archetypes) are never redrawn.
-  if (!query && !process.env.RIG_QUERY) {
-    for (let i = 0; i < 12; i++) {
-      const onScreen = await page.eval(() => {
-        const r = document.querySelector('[data-rack]')?.getBoundingClientRect()
-        return !!r && r.bottom <= window.innerHeight
-      })
-      if (onScreen) break
-      await page.reload()
-      if (diff) await clickButton(page, diff)
-      await waitForBoard(page)
-    }
-  }
+  // NO redraw-until-the-rack-is-visible loop here, deliberately. One existed for
+  // a session and hid a real bug (chain's 10-row board pushed the rack off a
+  // phone screen). The rack is now sticky (PlayScreen.tsx), and
+  // `RIG_QUERY='?forceArchetype=chain'` runs any rig on that worst case.
   await page.takeRecord()
 }
 
@@ -168,6 +154,7 @@ export async function readState(page) {
       rows: cells.length ? Math.max(...cells.map(c => c.r)) + 1 : 0,
       cols: cells.length ? Math.max(...cells.map(c => c.c)) + 1 : 0,
       rackBox: rackEl ? box(rackEl) : null,
+      viewportH: window.innerHeight,
       preview: preview ? { ...box(preview), sig: sigOf(preview.firstElementChild) } : null,
       bodyUserSelect: document.body.style.userSelect,
       bodyCursor: document.body.style.cursor,
@@ -199,15 +186,28 @@ export function uniqueRackTiles(s) {
   return s.rack.map((t, i) => ({ ...t, i })).filter(t => n.get(t.sig) === 1)
 }
 
-/** Empty cells that are fully inside the visible scroller viewport. */
-export function visibleEmptyCells(s) {
+/**
+ * A cell a player can actually see and touch: fully inside the scroller's
+ * horizontal viewport, inside the window vertically, and NOT under the rack.
+ * The rack is sticky at the bottom of the viewport (PlayScreen.tsx), so on a
+ * tall board it covers the lowest rows until the page is scrolled.
+ */
+function onScreen(s, c) {
   const sc = s.scroller
-  return s.cells.filter(c => !c.occupied && (!sc || (c.left >= sc.left - 0.5 && c.right <= sc.right + 0.5)))
+  if (sc && !(c.left >= sc.left - 0.5 && c.right <= sc.right + 0.5)) return false
+  if (c.top < -0.5 || c.bottom > s.viewportH + 0.5) return false
+  // The rack wrapper (label + rack + padding) starts ~25px above the rack box.
+  if (s.rackBox && c.bottom > s.rackBox.top - 25) return false
+  return true
+}
+
+/** Empty cells a player can see and touch (see onScreen). */
+export function visibleEmptyCells(s) {
+  return s.cells.filter(c => !c.occupied && onScreen(s, c))
 }
 
 export function visibleCells(s, pred = () => true) {
-  const sc = s.scroller
-  return s.cells.filter(c => pred(c) && (!sc || (c.left >= sc.left - 0.5 && c.right <= sc.right + 0.5)))
+  return s.cells.filter(c => pred(c) && onScreen(s, c))
 }
 
 export const grid2str = s => s.cells.map(c => c.sig ?? '.').join(',')
