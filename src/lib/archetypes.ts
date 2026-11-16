@@ -195,7 +195,11 @@ export function existsNoRelocationWin(board: Grid, rack: Tile[]): RelocationSear
         const rest = [...remaining.slice(0, i), ...remaining.slice(i + 1)]
 
         grid[r][c] = tile
-        const key = `${r},${c},${tile.n}${tile.c}|${rest.map(t => `${t.n}${t.c}`).sort().join(',')}`
+        // The key is the WHOLE state: every rack tile placed so far, by cell.
+        // (It used to be only this cell + tile + what remained, which merged
+        // different boards and pruned real wins. Out-of-order runs used to
+        // hide that; see runOrder.verify.ts and verifyEngine's deep2 check.)
+        const key = [...placed.map(([pr, pc]) => `${pr},${pc},${grid[pr][pc]!.n}${grid[pr][pc]!.c}`), `${r},${c},${tile.n}${tile.c}`].sort().join(';')
         if (!seen.has(key)) {
           seen.add(key)
           // The placed tile, and every tile whose row-segment it just joined,
