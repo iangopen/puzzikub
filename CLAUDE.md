@@ -880,10 +880,10 @@ Detail and tables: **`GENERATOR_AUDIT.md` §9**.
   uniqueness = search nodes <= 2000 + median < 5 ms. Mutation: a 4 ms injected
   slowdown fails red herring. pairingMin's coverage loop (>= 265 BFS checks) had
   a 480 s clock that ran out on a slow machine; the cap is now 1200 s.
-- Gate: `npm run verify` 17/17. `verify:full` NOT confirmed green: the first run
-  failed only pairingMin LINK 1 (30/1, the 480 s clock, fixed since); the re-run
-  was killed for low system memory after build, lint, verifyEngine 51/0, decoy
-  23/0. **Re-run `npm run verify:full` before merging.**
+- Gate: `npm run verify` 17/17; `npm run verify:full` **18/18, exit 0** on the pushed
+  code (pairingMin 31/0 after its clock fix, valueGroupPlanner 29/0, uniqueness 55/0,
+  finishLayouts 20/0, verify:mobile 42/24/54/54, verify:library 37). An earlier
+  `verify:full` failed only pairingMin LINK 1 (30/1) on the 480 s clock.
 
 **Needs Ian's play-test before merging:** extreme without groups-to-runs (now
 decoy 32%, runs-to-groups 24%, composed 23%, red herring 21%); hard groups-to-runs
