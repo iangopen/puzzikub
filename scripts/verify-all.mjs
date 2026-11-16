@@ -3,13 +3,13 @@
  * Runs the build, every engine harness, and the browser rigs, in sequence,
  * printing each step's pass/fail line and a summary. Exit 1 if anything fails.
  *
- *   npm run verify        build + lint + 12 harnesses + verify:mobile + verify:library
+ *   npm run verify        build + lint + 13 harnesses + verify:mobile + verify:library
  *   npm run verify:full   the same plus valueGroupPlanner (~6 min)
  *
  * TWO TRAPS this runner exists to get right (both measured the first time):
  *  - The harnesses EXIT 0 EVEN WHEN CHECKS FAIL. A step therefore fails if its
  *    exit code is non-zero OR any "N passed, M failed" line has M > 0.
- *  - Several harnesses assert WALL-CLOCK budgets (redherring <5ms/build,
+ *  - Several harnesses assert WALL-CLOCK budgets (redherring median <5ms/build,
  *    cutpoint <50ms). Running all eleven at once broke those budgets
  *    (redherring 23/2, cutpoint 35/1). So the timed harnesses run ONE AT A
  *    TIME. Only the long, budget-free pairingMin (and valueGroupPlanner, whose
@@ -23,6 +23,7 @@ const SEQUENTIAL = [
   'decoy.verify.ts', 'redherring.verify.ts', 'composed.verify.ts', 'cutpoint.verify.ts',
   'chain.verify.ts', 'mixedGoalPlanner.verify.ts', 'storage.verify.ts',
   'dragIdentity.verify.ts', 'trapVariants.verify.ts', 'uniqueness.verify.ts',
+  'finishLayouts.verify.ts',
 ]
 const BACKGROUND = ['pairingMin.verify.ts', ...(full ? ['valueGroupPlanner.verify.ts'] : [])]
 
