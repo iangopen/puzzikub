@@ -14,8 +14,8 @@ with or endorsed by** the makers of Rummikub.
 
 - Tiles carry a number from 1 to 13 in one of four colours. A puzzle may hold up
   to two copies of the same tile.
-- A **run** is three or more tiles of one colour with consecutive numbers
-  (`4 5 6 7`). A **group** is three or four tiles with the same number and all
+- A **run** is three or more tiles of one colour with consecutive numbers,
+  laid in ascending order from left to right (`4 5 6 7`, not `5 4 6 7`). A **group** is three or four tiles with the same number and all
   different colours.
 - Sets are read **horizontally**: each unbroken stretch of tiles in a row must
   be a valid run or group.

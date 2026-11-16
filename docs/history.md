@@ -80,3 +80,13 @@
   tested), uniqueness (node count + median), pairingMin (coverage loop's clock
   cap 480 s → 1200 s after it failed under a slow `verify:full`).
 - Not merged, not deployed.
+
+## 2026-11-15 — runs must read ascending (branch `generator-uniqueness-tiers`)
+- Baseline `verify` 16/17: redherring's extreme timing check failed while a probe of
+  mine ran alongside it; alone it was 25/0.
+- Rule: ascending left to right (Tutorial.tsx:11, "consecutive order"; direction from the
+  Rummikub convention). `isOrderedRun` in the grid check only.
+- `runOrder.verify.ts`: 10/5 before the fix, 15/0 after. finishLayouts pin flipped.
+- Exposed and fixed an unsound memo key in `existsNoRelocationWin`.
+- After: `verify` 18/18; cut-vs-par PASS; chain phone screenshot regenerated.
+- Not merged, not deployed.

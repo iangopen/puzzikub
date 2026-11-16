@@ -723,10 +723,10 @@ three positions, and plays every layout move by move through `playReducer`:
 Negative controls (two colours touching, a 2+4 cut, one tile left in the rack)
 are refused with cells flagged.
 
-**Finding, not changed:** `isValidRun` sorts by value, so a run's tiles may
-stand in any left-to-right order. `11 12 13 8 9 10` in one colour wins. The
-harness pins this as current behaviour. Whether to require order is a rules
-decision.
+**Finding, FIXED later the same day:** `isValidRun` sorts by value, so a run's tiles
+could stand in any left-to-right order, and `11 12 13 8 9 10` in one colour won. The
+board now requires ascending order (`isOrderedRun`, pinned by `runOrder.verify.ts`);
+this harness's check became a negative control. The layout counts above are unchanged.
 
 ### 9.2 Par was beaten, widely
 

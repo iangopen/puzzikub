@@ -1,5 +1,5 @@
 # Puzzikub — CLAUDE.md
-*Last updated: 2026-11-15 — on branch `generator-uniqueness-tiers` (NOT merged, NOT deployed): uniqueness gate + par tier bands, then cut-aware groups-to-runs par, sticky rack, load-robust timing checks. Needs Ian's play-test before merging.*
+*Last updated: 2026-11-15 — on branch `generator-uniqueness-tiers` (NOT merged, NOT deployed): uniqueness gate + par tier bands, then cut-aware groups-to-runs par, sticky rack, load-robust timing checks, then runs must read ascending on the board. Needs Ian's play-test before merging.*
 
 ## Project overview
 Rummikub-style clear-your-rack puzzle game on a free grid.
@@ -16,7 +16,7 @@ base must always be '/puzzikub/' — never change this, never remove it.
 ## Testing & verification workflow
 ### THE STANDING SAFETY NET — run this, do not list harnesses by hand
 ```
-npm run verify        build + lint + 13 engine harnesses + verify:mobile + verify:library  (~10 min)
+npm run verify        build + lint + 14 engine harnesses + verify:mobile + verify:library  (~10 min)
 npm run verify:full   the same + valueGroupPlanner                                  (~8 min)
 ```
 Run `verify` before AND after any change; run `verify:full` before merging.
@@ -400,7 +400,7 @@ export function getNewlyValidCells(prevGrid: Grid, newGrid: Grid): Set<string>
 reading `validator.ts`; this section used to say "either direction", which the
 code has not done for a long time): a tile is valid only if its maximal
 contiguous segment within its own ROW is a valid run or group of length ≥3.
-Vertical adjacency means nothing. **Runs need not be in left-to-right order**:`isValidRun` sorts by value, so `11 12 13 8 9 10` in one colour is valid (pinned in`finishLayouts.verify.ts`; a rules decision, not changed). Win condition: `rack.length === 0 && validateGrid(grid)` —
+Vertical adjacency means nothing. **A run on the board must read ASCENDING, left to right, one step at a time** (`3 4 5`; never `5 3 4`, `5 4 3` or `11 12 13 8 9 10`). The grid check uses `isOrderedRun`; `isValidRun` stays ORDER-FREE on purpose, because the solver and builders reason about bags, which have no order. Do not make `isValidRun` order-aware, and do not let the grid check call it. The source for the rule is the Tutorial ("3+ tiles of the same color in consecutive order", `src/components/Tutorial.tsx:11`; its example is `3 4 5`). Nothing in the code settled the direction, so ascending follows the Rummikub convention. Pinned by `runOrder.verify.ts` (enforced 2026-11-15; before that, any order won). Groups may stand in any colour order. Win condition: `rack.length === 0 && validateGrid(grid)` —
 no bag-based fallback, ever.
 
 ### Generator + Archetypes (src/lib/generator.ts, src/lib/archetypes.ts)
@@ -842,6 +842,9 @@ src/lib/dragIdentity.verify.ts      29
 src/lib/finishLayouts.verify.ts     20   (the finish check wins on EVERY strict partition
                                           of real L=5/6 puzzles, 1,164 layouts, through the
                                           real playReducer; refuses invalid controls)
+src/lib/runOrder.verify.ts          15   (runs must read ascending: 5 3 4 / 5 4 3 / 6 7 8 3 4 5
+                                          refused and flagged, 3 4 5 _ 6 7 8 wins, through
+                                          validateGrid and the real playReducer)
 src/lib/uniqueness.verify.ts        55   (the uniqueness proof: a known two-solution
                                           puzzle is refused; search == brute force on
                                           3,971 random bags; every shipped puzzle is
@@ -859,6 +862,26 @@ src/lib/valueGroupPlanner.verify.ts 29   (~6 min — 30 exhaustive L=8 boards;
 ---
 
 ## Current status (update this after each session)
+### 2026-11-15 (latest) — runs must read ascending on the board (same branch): NOT merged, NOT deployed
+**Rule enforced: ascending, left to right, one step at a time.** Source: the Tutorial,
+`src/components/Tutorial.tsx:11` ("consecutive order", example `3 4 5`). It names no direction,
+so ascending is the Rummikub convention. `validator.ts` gained `isOrderedRun`, used only by the grid
+check (`validateGrid` / `getInvalidCells`); `isValidRun` stays the order-free bag predicate.
+New `runOrder.verify.ts`: **10 passed / 5 failed before the fix** (5 3 4, 3 5 4, 5 4 3,
+6 7 8 3 4 5 and a reducer-level "5 3 4" drop were all accepted), 15/0 after.
+`finishLayouts.verify.ts` no longer pins the old behaviour; its wrong-order check is now a negative
+control (still 20/0), and every equivalent layout still wins (hard 192/192, extreme 972/972).
+
+**A latent bug it exposed, fixed:** `existsNoRelocationWin` (`archetypes.ts`, invariant (d))
+memoised on "this cell + tile + rack left", ignoring where EARLIER tiles went, so it pruned real
+wins. Out-of-order acceptance hid this: verifyEngine's planted `5 _ 7` + rack `6 8` win was only
+found as "5 8 7 6". The key is now the full set of placements. On 150 shipped puzzles per tier:
+0 exhausted, 0 wins either way; extreme search p95 18.7 → 30.1 ms, other tiers about unchanged.
+
+Re-confirmed: `npm run verify` 18/18, exit 0; `cutVsPar.ts 1000` PASS (0 replay failures, 0 pars
+beaten); chain at 390×844: rack box 754-836 px, all 6 tiles on screen (`docs/screenshots/phone-chain.png`).
+`verify:full` was not re-run this session.
+
 ### 2026-11-15 (later) — finish check, cut-vs-par, sticky rack, timing checks (same branch): NOT merged, NOT deployed
 Detail and tables: **`GENERATOR_AUDIT.md` §9**.
 
@@ -891,8 +914,8 @@ at L=6; the sticky rack on a real phone (it covers the lowest board rows until
 the page is scrolled; on chain those rows are empty).
 
 **Still open:** generation is slower (hard p95 22 → 65 ms, max 297 ms; extreme mean
-14 → 41 ms); runs-to-groups par not checked for free placement; out-of-order runs
-accepted (rules call); iOS Safari / real device.
+14 → 41 ms); runs-to-groups par not checked for free placement; iOS Safari / real device.
+*(Out-of-order runs: FIXED, see the entry above.)*
 
 ### 2026-11-15 — uniqueness gate + tier bands (branch `generator-uniqueness-tiers`): NOT merged, NOT deployed
 Tier moves here are feel decisions: play the branch before merging. Numbers and
