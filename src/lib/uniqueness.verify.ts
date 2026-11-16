@@ -188,6 +188,7 @@ console.log('\n=== 6. every shipped puzzle is unique and inside its band ===')
     let made = 0, unique = 0, inBand = 0, nulls = 0, gateMs = 0, gateMax = 0, nodesMax = 0
     const kinds = new Map<string, number>()
     const pars: number[] = []
+    const gateTimes: number[] = []
     for (let i = 0; i < N; i++) {
       const p = generatePuzzle(diff)
       if (!p) { nulls++; continue }
@@ -202,18 +203,26 @@ console.log('\n=== 6. every shipped puzzle is unique and inside its band ===')
       const r = distinctSolutions(bag, 2)
       const dt = performance.now() - t0
       gateMs += dt
+      gateTimes.push(dt)
       gateMax = Math.max(gateMax, dt)
       nodesMax = Math.max(nodesMax, r.nodes)
     }
     console.log(`  ${diff.padEnd(8)} made ${made}/${N}  unique (brute) ${unique}  par ${Math.min(...pars)}-${Math.max(...pars)} in band ${PAR_BAND[diff][0]}-${PAR_BAND[diff][1]}: ${inBand}`)
-    console.log(`  ${''.padEnd(8)} uniqueness proof: mean ${(gateMs / made).toFixed(3)} ms, max ${gateMax.toFixed(2)} ms, max ${nodesMax} nodes`)
+    gateTimes.sort((a, b) => a - b)
+    const gateMedian = gateTimes[Math.floor(gateTimes.length / 2)]
+    console.log(`  ${''.padEnd(8)} uniqueness proof: median ${gateMedian.toFixed(3)} ms, mean ${(gateMs / made).toFixed(3)} ms, max ${gateMax.toFixed(2)} ms, max ${nodesMax} nodes`)
     console.log(`  ${''.padEnd(8)} gate refusals in ${generationStats.attempts} builder calls: not unique ${generationStats.notUnique}, out of band ${generationStats.outOfBand}, builder null ${generationStats.rejected - generationStats.notUnique - generationStats.outOfBand}`)
     console.log(`  ${''.padEnd(8)} mix: ${[...kinds.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`)
     check(`${diff}: ${N} puzzles generated, none null`, made === N && nulls === 0)
     check(`${diff}: every puzzle has exactly one distinct solution`, unique === made)
     check(`${diff}: every par is inside ${PAR_BAND[diff][0]}-${PAR_BAND[diff][1]}`, inBand === made)
     check(`${diff}: at least two archetypes still ship`, kinds.size >= 2)
-    check(`${diff}: the uniqueness proof costs under 5 ms per puzzle`, gateMax < 5)
+    // Budget on WORK (search nodes, independent of machine load) plus the median
+    // time. The max time used to be asserted and failed under verify:full load
+    // (4/4 tiers, 2026-11-15) while the node count was unchanged. 2000 nodes is
+    // ~4x the largest seen (468); 5 ms median is the old budget.
+    check(`${diff}: the uniqueness proof stays under 2000 search nodes per puzzle`, nodesMax <= 2000)
+    check(`${diff}: the uniqueness proof's median time is under 5 ms`, gateMedian < 5)
   }
 }
 

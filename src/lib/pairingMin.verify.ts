@@ -334,8 +334,12 @@ console.log('\n3. LINK 1: min over pairings == min over BFS-per-pairing (unrestr
   const t0 = Date.now()
   // Budget is wall-clock, not tractability: at the sizes below the node cap is
   // never reached (BFS-refused stays 0) — it is simply ~1s per instance to BFS
-  // every pairing. 480s comfortably clears the >=265 bar the m=1 model was held to.
-  for (let it = 0; it < 30000 && bfsChecked < 300 && Date.now() - t0 < 480_000; it++) {
+  // every pairing. The loop STOPS at 300 checks (~4 min on an idle machine); the
+  // clock is only a safety cap. It used to be 480s, and under verify:full on a
+  // loaded machine (2026-11-15: every step ran 2-3x slower, including harnesses
+  // that share no code with this one) it ran out before 265 and failed a
+  // COVERAGE check for a SPEED reason. 1200s keeps the coverage requirement.
+  for (let it = 0; it < 30000 && bfsChecked < 300 && Date.now() - t0 < 1_200_000; it++) {
     const v = randInt(1, 8)
     const [c, x, y, z] = shuffle(ALL)
     const shape = randInt(0, 2)
