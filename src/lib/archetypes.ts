@@ -10,6 +10,7 @@ import { solveBagM2 } from './solver'
 import { isValidRun, isValidGroup, validateGrid } from './validator'
 import { type WindowSpec, type Drop, bindMinCostGoal } from './mixedGoalPlanner'
 import { partitionCount } from './difficultyProxy'
+import { planCutRunGoal } from './cutRunPlanner'
 
 /** The two directions of the same Latin-rectangle duality. */
 export type ArchetypeType = 'groups-to-runs' | 'runs-to-groups'
@@ -724,7 +725,14 @@ export function planValueGroupGoalExhaustive(grid: Grid, rack: Tile[]): GoalPlan
 
 interface Params { L: number; rackSize: number }
 
-function paramsFor(diff: Difficulty): Params {
+/**
+ * groups-to-runs sizes. EXTREME IS NULL since the cut-vs-par session: the honest
+ * par of this archetype (planRunGoal, which lets runs be cut and placed freely)
+ * is 17-20 at L=6, a hard-tier number, and no size that fits the board reaches
+ * the extreme band. L=6 is therefore the HARD size (it was the extreme one), and
+ * the old hard size L=5 (honest par 14-18) is not shipped.
+ */
+function paramsFor(diff: Difficulty): Params | null {
   switch (diff) {
     case 'easy': return { L: 3, rackSize: 2 }
     // rackSize 4, not 3 (uniqueness/tier session). With three boundary tiles one
@@ -733,9 +741,22 @@ function paramsFor(diff: Difficulty): Params {
     // short of it. Measured 2 distinct solutions on 200/200. A boundary tile on
     // all four colours forces all four runs: 1 solution on 200/200, par 12-16.
     case 'medium': return { L: 4, rackSize: 4 }
-    case 'hard': return { L: 5, rackSize: 4 }
-    case 'extreme': return { L: 6, rackSize: 4 }
+    case 'hard': return { L: 6, rackSize: 4 }
+    case 'extreme': return null
   }
+}
+
+/**
+ * Par for a "one run per colour" goal: the cheaper of the classic layout (whole
+ * runs, one per row, aligned: planColorRunGoal) and the cut-aware free-placement
+ * search (planCutRunGoal in cutRunPlanner.ts). Ties keep the classic layout.
+ * Returns null exactly when planColorRunGoal does (the tiles are not that shape).
+ */
+export function planRunGoal(grid: Grid, rack: Tile[]): GoalPlan | null {
+  const aligned = planColorRunGoal(grid, rack)
+  if (!aligned) return null
+  const cut = planCutRunGoal(grid, rack)
+  return cut && cut.moves < aligned.moves ? { moves: cut.moves, goal: cut.goal } : aligned
 }
 
 /**
@@ -752,9 +773,16 @@ function derangedFrom(prev: Tile['c'][] | null): Tile['c'][] | null {
   return null
 }
 
-export function buildGroupsToRuns(diff: Difficulty): ArchetypeResult | null {
-  const { L, rackSize } = paramsFor(diff)
+/** Whether groups-to-runs ships at this tier (it does not at extreme). */
+export const groupsToRunsShipsAt = (diff: Difficulty): boolean => paramsFor(diff) !== null
 
+export function buildGroupsToRuns(diff: Difficulty): ArchetypeResult | null {
+  const p = paramsFor(diff)
+  return p ? buildGroupsToRunsAt(p.L, p.rackSize) : null
+}
+
+/** One groups-to-runs build at an explicit size (harnesses use this directly). */
+export function buildGroupsToRunsAt(L: number, rackSize: number): ArchetypeResult | null {
   // Need s-1 and s+L to exist inside 1..13.
   const s = randomInt(2, 13 - L)
 
@@ -808,8 +836,9 @@ export function buildGroupsToRuns(diff: Difficulty): ArchetypeResult | null {
 
   // Reference solution: the same tiles rebuilt as 4 runs, one colour per row.
   // Which colour takes which row, and where the block sits, are free — so pick
-  // the layout the player can reach in the fewest moves. See planColorRunGoal.
-  const plan = planColorRunGoal(grid, rack)
+  // the layout the player can reach in the fewest moves. A run may also be laid
+  // as two shorter runs, and strips need not line up; see planRunGoal.
+  const plan = planRunGoal(grid, rack)
   if (!plan) return null
 
   return { grid, rack: shuffle(rack), allTiles, minMoves: plan.moves }
@@ -1399,8 +1428,7 @@ export function proveRedHerringAt(L: number, variant?: HerringVariant): ProofLin
   return redHerringCore(L, variant).proof
 }
 
-function redHerringCore(L: number, variantIn?: HerringVariant): Proved<RedHerringBuild> {
-  const none: Proved<RedHerringBuild> = { build: null, proof: [] }
+function redHerringCore(L: number, variantIn?: HerringVariant): Proved<RedHerringBuild> {  const none: Proved<RedHerringBuild> = { build: null, proof: [] }
   if (L < 5) return none // <5: no middle group, and the four supports would be a run
   const variant = variantIn ?? { split: false, fillers: [] }
   const F = variant.fillers

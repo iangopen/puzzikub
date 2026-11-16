@@ -9,7 +9,7 @@ import {
   existsNoRelocationWin,
   obviousPlacementWins,
   isTrivial,
-  planColorRunGoal,
+  planRunGoal,
   planValueGroupGoal,
   type GoalPlan,
 } from './archetypes'
@@ -253,8 +253,10 @@ let anyInvariantFailed = false
 
 /** The two directions of the duality, each with the goal shape it targets. */
 const ARCHETYPES = [
-  { id: 'groups-to-runs' as const, build: buildGroupsToRuns, plan: planColorRunGoal },
-  { id: 'runs-to-groups' as const, build: buildRunsToGroups, plan: planValueGroupGoal },
+  // groups-to-runs does not ship at extreme (its honest, cut-aware par is a hard
+  // number there; see paramsFor in archetypes.ts), so it is not built at extreme.
+  { id: 'groups-to-runs' as const, build: buildGroupsToRuns, plan: planRunGoal, tiers: ['easy', 'medium', 'hard'] as Difficulty[] },
+  { id: 'runs-to-groups' as const, build: buildRunsToGroups, plan: planValueGroupGoal, tiers: difficulties },
 ]
 
 const sampleKey = (a: string, d: Difficulty) => `${a}|${d}`
@@ -284,7 +286,7 @@ function goalLayoutIsReachable(grid: Grid, allTiles: Tile[], plan: GoalPlan | nu
 for (const arch of ARCHETYPES) {
   console.log(`########## ARCHETYPE: ${arch.id} ##########`)
   console.log('')
-  for (const diff of difficulties) {
+  for (const diff of arch.tiers) {
     let built = 0, attempts = 0, nulls = 0
     let failA = 0, failB = 0, failC = 0, failD = 0, failDobvious = 0, failCollision = 0, exhausted = 0
     let failE = 0, bruteChecked = 0, bruteDisagree = 0
@@ -373,7 +375,7 @@ for (const arch of ARCHETYPES) {
 // ---------------------------------------------------------------------------
 console.log('=== STARTING BOARDS AT MOVE ZERO (2 real puzzles per archetype per difficulty) ===')
 for (const arch of ARCHETYPES) {
-  for (const diff of difficulties) {
+  for (const diff of arch.tiers) {
     for (const [i, s] of (samples.get(sampleKey(arch.id, diff)) ?? []).entries()) {
       const invalid = getInvalidCells(s.grid)
       console.log(`\n--- ${arch.id} / ${diff} #${i + 1} --- rack: ${showTiles(s.rack)}   minMoves: ${s.minMoves}`)
@@ -393,7 +395,7 @@ for (const arch of ARCHETYPES) {
 // The plan is executed the way the cost proof says it can be: drain every path
 // (tile whose goal cell is empty) first, then unwind each remaining cycle by
 // swapping into the goal cell, then drop the rack onto the cells now free. If
-// the simulated move count ever differs from planColorRunGoal's number, or the
+// the simulated move count ever differs from the plan's number, or the
 // final grid does not satisfy validateGrid, the number is wrong.
 // ---------------------------------------------------------------------------
 console.log('=== minMoves: SIMULATED REAL MOVE SEQUENCE (reducer semantics) ===')
@@ -470,7 +472,7 @@ function simulatePlan(startGrid: Grid, startRack: Tile[], plan: GoalPlan | null)
 // Built directly from each archetype (not generatePuzzle) so both directions are
 // exercised at every difficulty regardless of the 50/50 coin flip.
 for (const arch of ARCHETYPES) {
-  for (const diff of difficulties) {
+  for (const diff of arch.tiers) {
     let simmed = 0, exact = 0, wonAll = 0, calls = 0, rejected = 0
     const lines: string[] = []
     for (let i = 0; i < 5; i++) {

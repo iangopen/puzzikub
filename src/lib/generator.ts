@@ -1,7 +1,7 @@
 import type { Difficulty, Puzzle } from '../types'
 import {
   buildChain, buildChainVariant, buildComposed, buildComposedVariant, buildCutPoint, buildDecoy, buildDecoyVariant,
-  buildRedHerring, buildRedHerringVariant, buildGroupsToRuns, buildRunsToGroups, type ArchetypeType, type ArchetypeResult,
+  buildRedHerring, buildRedHerringVariant, buildGroupsToRuns, buildRunsToGroups, groupsToRunsShipsAt, type ArchetypeType, type ArchetypeResult,
 } from './archetypes'
 import { shipVerdict } from './tierBands'
 
@@ -170,7 +170,11 @@ export function generatePuzzle(diff: Difficulty, forceType?: ForceType): Puzzle 
     const herring = generateRedHerring(diff)
     if (herring) return herring
   }
-  const first: ArchetypeType = Math.random() < 0.5 ? 'groups-to-runs' : 'runs-to-groups'
+  // groups-to-runs has no extreme size (see paramsFor in archetypes.ts). The coin
+  // is still flipped so the draws at the other tiers are unchanged.
+  const coin = Math.random() < 0.5
+  if (!groupsToRunsShipsAt(diff)) return generateArchetype('runs-to-groups', diff)
+  const first: ArchetypeType = coin ? 'groups-to-runs' : 'runs-to-groups'
   const second: ArchetypeType = first === 'groups-to-runs' ? 'runs-to-groups' : 'groups-to-runs'
   return generateArchetype(first, diff) ?? generateArchetype(second, diff)
 }
